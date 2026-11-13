@@ -11,6 +11,10 @@
 
 > Projet non officiel, sans lien avec Evoworks. « EVO80 » et « Evoworks » sont des marques de leurs propriétaires respectifs.
 
+<p align="center">
+  <img src="docs/screenshots/apercu-3d.png" alt="Capglow : aperçu 3D du clavier avec l'effet Défilement horizontal">
+</p>
+
 ## Ce que fait Capglow
 
 - Aperçu 3D du clavier en temps réel, qui reproduit l'effet choisi.
@@ -19,6 +23,15 @@
 - Enregistrement dans la mémoire du clavier : le look reste après un redémarrage.
 - Profils enregistrés sur le PC, pour changer d'ambiance en un clic.
 - Les 10 coloris de l'EVO80 pour que l'aperçu ressemble à ton clavier.
+
+## Aperçu
+
+| | |
+| --- | --- |
+| ![Coloris Ink avec l'effet Spirale](docs/screenshots/coloris-ink.png) | ![Coloris Iceberg avec l'effet Ciel étoilé](docs/screenshots/ciel-etoile.png) |
+| Les 10 coloris de l'EVO80, ici Ink avec l'effet Spirale | Ciel étoilé en bleu azur sur le coloris Iceberg |
+| ![Gros plan sur la barre lumineuse](docs/screenshots/barre-lumineuse.png) | ![Fenêtre des paramètres](docs/screenshots/parametres.png) |
+| La caméra zoome sur la barre lumineuse quand on la règle | Coloris du clavier et lancement au démarrage de Windows |
 
 ## Prérequis
 
