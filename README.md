@@ -41,9 +41,11 @@
 
 ## Installation
 
-Télécharge la dernière version dans l'onglet [Releases](../../releases), puis lance l'exécutable. Aucun pilote ni installation n'est nécessaire.
+1. Télécharge `Capglow-…-windows-x64.zip` dans l'onglet [Releases](../../releases).
+2. Fais un clic droit sur le zip, puis « Extraire tout ».
+3. Lance `Capglow.exe` dans le dossier extrait. Aucun pilote ni installation n'est nécessaire.
 
-L'exécutable n'est pas signé numériquement. Windows peut donc afficher un avertissement SmartScreen (« Informations complémentaires », puis « Exécuter quand même »). Si Smart App Control est actif sur ton PC, il bloque les applications non signées : dans ce cas, lance Capglow depuis les sources (voir ci-dessous).
+`Capglow.exe` est le binaire Electron officiel, non modifié : il passe Smart App Control et SmartScreen, qui bloquent les exécutables inconnus non signés.
 
 ## Développement
 
