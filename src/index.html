@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-QHspYcLLOKSarKa9WCONpLgp80qJjPebMyusqjGSeoo='">
+  <title>Capglow</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="titlebar">
+    <img class="brand" src="assets/logo-mark.svg" alt="Capglow">
+    <span class="status" id="status" data-state="none"><i></i><span id="status-text">Recherche du clavier…</span></span>
+    <button class="titlebar-btn" id="open-settings" title="Paramètres" aria-label="Paramètres"><svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" d="M8.6 2.5h2.8l.4 2.1 1.5.9 2-.8 1.4 2.4-1.6 1.4v1.8l1.6 1.4-1.4 2.4-2-.8-1.5.9-.4 2.1H8.6l-.4-2.1-1.5-.9-2 .8-1.4-2.4 1.6-1.4V9.3L3.3 7.9l1.4-2.4 2 .8 1.5-.9z"/><circle cx="10" cy="10" r="2.4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+  </header>
+
+  <div class="app">
+    <main class="stage" id="stage" aria-label="Aperçu du clavier">
+      <div class="stage-bar">
+        <div class="segmented" role="tablist" aria-label="Zone à régler">
+          <button role="tab" class="seg" data-zone="keys" aria-selected="true">Touches</button>
+          <button role="tab" class="seg" data-zone="logo" aria-selected="false">Barre lumineuse</button>
+        </div>
+      </div>
+
+      <div class="scene"><canvas id="kb"></canvas></div>
+
+      <div class="caption">
+        <span class="caption-family" id="np-family"></span>
+        <span class="caption-name" id="np-name"></span>
+      </div>
+
+      <div class="dock">
+        <div class="dock-group dock-profiles">
+          <span class="dock-label">Profils</span>
+          <ul class="profiles" id="profiles"></ul>
+          <button class="icon-btn" id="profile-add" title="Enregistrer le look actuel comme profil" aria-label="Enregistrer le look actuel comme profil">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="notice" id="notice" hidden>
+        <h2 id="notice-title">Branche ton EVO80 en filaire</h2>
+        <ol>
+          <li>Débranche le dongle 2.4G.</li>
+          <li>Mets l’interrupteur du clavier sur la position câble.</li>
+          <li>Branche le câble USB-C.</li>
+        </ol>
+        <p>Tu peux préparer ton look en attendant : il sera envoyé dès la connexion.</p>
+        <button class="btn btn-quiet" id="retry">Rechercher le clavier</button>
+      </div>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    </main>
+
+    <aside class="inspector" aria-label="Réglages de l'éclairage">
+      <div class="inspector-scroll">
+        <section class="section">
+          <div class="section-head">
+            <h2>Effet</h2>
+            <button class="switch" id="power" role="switch" aria-checked="true">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span id="power-label">Allumé</span>
+            </button>
+          </div>
+          <div class="tabs" id="fx-tabs" role="tablist" aria-label="Familles d'effets"></div>
+          <div class="fx-grid" id="fx-grid"></div>
+        </section>
+
+        <section class="section" id="color-section">
+          <div class="section-head">
+            <h2>Couleur</h2>
+            <span class="color-readout"><i id="color-chip"></i><span id="color-name">Personnalisée</span></span>
+          </div>
+          <p class="muted-note" id="color-off" hidden>Cet effet choisit ses propres couleurs.</p>
+          <div class="color-controls" id="color-controls">
+            <div class="palette" id="palette" role="radiogroup" aria-label="Couleurs prédéfinies"></div>
+            <label class="field">
+              <span class="field-head"><span>Teinte</span><output id="hue-out"></output></span>
+              <input type="range" class="range range-hue" id="hue" min="0" max="255" step="1">
+            </label>
+            <label class="field">
+              <span class="field-head"><span>Saturation</span><output id="sat-out"></output></span>
+              <input type="range" class="range range-sat" id="sat" min="0" max="255" step="1">
+            </label>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2>Réglages</h2>
+          <label class="field">
+            <span class="field-head"><span>Luminosité</span><output id="bright-out"></output></span>
+            <input type="range" class="range" id="bright" min="0" max="180" step="1">
+          </label>
+          <label class="field">
+            <span class="field-head"><span>Vitesse</span><output id="speed-out"></output></span>
+            <input type="range" class="range" id="speed" min="0" max="255" step="1">
+          </label>
+        </section>
+      </div>
+
+      <footer class="inspector-foot">
+        <p class="foot-note" id="foot-note">Les réglages s’appliquent en direct.</p>
+        <button class="btn btn-primary" id="save" disabled>Enregistrer dans le clavier</button>
+      </footer>
+    </aside>
+  </div>
+
+  <dialog id="name-dialog">
+    <form method="dialog">
+      <label for="profile-name">Nom du profil</label>
+      <input id="profile-name" maxlength="24" required placeholder="Soirée jeu" autocomplete="off">
+      <div class="dialog-actions">
+        <button value="cancel" class="btn btn-quiet" formnovalidate>Annuler</button>
+        <button value="ok" class="btn btn-primary">Enregistrer le profil</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="importmap">{"imports":{"three":"../node_modules/three/build/three.module.js","three/addons/":"../node_modules/three/examples/jsm/"}}</script>
+  <dialog id="settings-dialog" class="settings" aria-labelledby="settings-title">
+    <div class="settings-head">
+      <h2 id="settings-title">Paramètres</h2>
+      <button class="icon-btn icon-btn-plain" id="close-settings" aria-label="Fermer"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+    </div>
+
+    <section class="settings-section">
+      <h3>Coloris de ton clavier</h3>
+      <p class="settings-hint">L’aperçu 3D reprend les couleurs de ton EVO80.</p>
+      <div class="theme-grid" id="themes" role="radiogroup" aria-label="Coloris du clavier"></div>
+    </section>
+
+    <section class="settings-section">
+      <h3>Démarrage</h3>
+      <button class="switch switch-row" id="open-at-login" role="switch" aria-checked="false">
+        <span class="switch-text">
+          <span>Lancer Capglow au démarrage de Windows</span>
+          <span class="settings-hint">Capglow démarre en arrière-plan, dans la zone de notification.</span>
+        </span>
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+      </button>
+    </section>
+
+    <p class="settings-foot">Capglow 0.1.0. Projet non officiel, sans lien avec Evoworks.</p>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

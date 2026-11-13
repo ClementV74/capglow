@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 40" width="140" height="40">
+  <defs>
+    <linearGradient id="lt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2f39"/>
+      <stop offset="1" stop-color="#15181d"/>
+    </linearGradient>
+    <linearGradient id="lrgb" gradientUnits="userSpaceOnUse" x1="7" y1="0" x2="34" y2="0">
+      <stop offset="0" stop-color="#f4b26d"/>
+      <stop offset=".45" stop-color="#ee5a8a"/>
+      <stop offset=".72" stop-color="#b55cf0"/>
+      <stop offset="1" stop-color="#3fd6e8"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="36" height="36" rx="9" fill="url(#lt)" stroke="#e6d5b8" stroke-opacity=".12"/>
+  <rect x="8" y="16.5" width="17" height="7" rx="3.5" fill="url(#lrgb)"/>
+  <circle cx="29.5" cy="20" r="4.2" fill="url(#lrgb)"/>
+  <text x="48" y="27.5" font-family="Bahnschrift, Segoe UI, sans-serif" font-size="21" letter-spacing=".5" fill="#ececee" font-weight="600">Capglow</text>
+</svg>

@@ -1,0 +1,40 @@
+{
+  "name": "capglow",
+  "productName": "Capglow",
+  "version": "0.1.0",
+  "description": "Contrôle de l'éclairage RGB du clavier Evoworks EVO80 (projet non officiel)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "io.github.capglow",
+    "productName": "Capglow",
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.ico"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^26.18.0"
+  },
+  "allowScripts": {
+    "electron@38.8.6": true,
+    "electron-winstaller@5.4.0": true
+  },
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "license": "GPL-3.0-or-later"
+}
