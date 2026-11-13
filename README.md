@@ -5,24 +5,35 @@
 <h1 align="center">Capglow</h1>
 
 <p align="center">
-  Une application Windows pour régler l'éclairage RGB du clavier <strong>Evoworks EVO80</strong>,<br>
+  Une application Windows pour régler l'éclairage RGB des claviers mécaniques VIA,<br>
   sans passer par un configurateur web.
 </p>
 
-> Projet non officiel, sans lien avec Evoworks. « EVO80 » et « Evoworks » sont des marques de leurs propriétaires respectifs.
+> Projet non officiel, sans lien avec Evoworks ni Weikav. « EVO80 », « Evoworks », « NUT65 » et « Weikav » sont des marques de leurs propriétaires respectifs.
 
 <p align="center">
   <img src="docs/screenshots/apercu-3d.png" alt="Capglow : aperçu 3D du clavier avec l'effet Défilement horizontal">
 </p>
 
+## Claviers pris en charge
+
+Capglow reconnaît automatiquement le clavier branché.
+
+| Clavier | État | Zones réglables |
+| --- | --- | --- |
+| Evoworks EVO80 | Testé | Touches et barre lumineuse |
+| Weikav NUT65 | Expérimental, pas encore testé sur un vrai clavier | Touches (la barre en façade se règle au clavier) |
+
+Sur un clavier expérimental, Capglow relit chaque réglage après l'avoir écrit et arrête d'écrire au moindre écart. Si tu as un NUT65, ton retour est précieux : exporte un diagnostic depuis les paramètres et [ouvre un ticket](../../issues/new).
+
 ## Ce que fait Capglow
 
 - Aperçu 3D du clavier en temps réel, qui reproduit l'effet choisi.
-- Les 45 effets du rétroéclairage des touches et les 9 effets de la barre lumineuse.
+- Tous les effets de rétroéclairage proposés par le firmware du clavier.
 - Couleur, luminosité et vitesse, appliquées en direct au clavier.
 - Enregistrement dans la mémoire du clavier : le look reste après un redémarrage.
 - Profils enregistrés sur le PC, pour changer d'ambiance en un clic.
-- Les 10 coloris de l'EVO80 pour que l'aperçu ressemble à ton clavier.
+- Les coloris officiels de chaque clavier pour que l'aperçu ressemble au tien.
 
 ## Aperçu
 
@@ -36,7 +47,7 @@
 ## Prérequis
 
 - Windows 10 ou 11.
-- Le clavier **branché en filaire (USB-C)**, interrupteur sur la position câble.
+- Le clavier **branché en filaire (USB-C)** : interrupteur sur la position câble pour l'EVO80, Fn + T pour le NUT65.
   Le dongle 2.4G et le Bluetooth ne permettent pas la configuration.
 
 ## Installation
@@ -58,6 +69,12 @@ npm start        # lance l'application
 npm run dist     # génère l'installateur et le zip dans dist/
 ```
 
+Sans le clavier sous la main, un clavier simulé répond aux commandes VIA comme le vrai :
+
+```sh
+CAPGLOW_SIMULATE=nut65 npm start
+```
+
 Le code est en JavaScript sans framework :
 
 | Fichier | Rôle |
@@ -65,9 +82,10 @@ Le code est en JavaScript sans framework :
 | `main.js` | Fenêtre Electron et autorisations WebHID |
 | `src/hid.js` | Protocole VIA (QMK Raw HID) : lecture, écriture, sauvegarde |
 | `src/effects.js` | Catalogue des effets et leur simulation pour l'aperçu |
-| `src/keyboard.js` | Disposition des touches et vignettes des effets |
+| `src/keyboards/` | Une définition par clavier : identifiants USB, disposition, zones, effets, coloris, modèle 3D |
+| `src/keyboard.js` | Couleurs des touches et vignettes des effets |
 | `src/keyboard3d.js` | Rendu 3D (Three.js) |
-| `src/themes.js` | Coloris de l'EVO80 |
+| `src/simulator.js` | Clavier VIA simulé, pour le développement |
 | `src/led.js` | Calibrage des couleurs des LED pour l'aperçu |
 | `src/app.js` | Interface |
 | `preload.js` | Réglages exposés à l'interface (démarrage, installation) |
@@ -76,14 +94,15 @@ Le code est en JavaScript sans framework :
 
 ### Protocole
 
-Le clavier expose l'interface VIA standard (page d'usage `0xFF60`, rapports de 32 octets) en filaire (`36B0:300E`).
+Les claviers exposent l'interface VIA standard (page d'usage `0xFF60`, rapports de 32 octets). Capglow n'utilise que les commandes d'éclairage : `0x07` (écrire), `0x08` (lire) et `0x09` (enregistrer), et refuse d'écrire si le clavier annonce un protocole VIA antérieur à la version 11.
 
-| Zone | Canal | Luminosité | Effets | Vitesse |
-| --- | --- | --- | --- | --- |
-| Touches | 3 (`rgb_matrix`) | 0 à 180 en écriture, lue sur 0 à 255 | 0 à 45 | 0 à 255 |
-| Barre lumineuse | 2 (`rgblight`) | 0 à 105 | 0 à 9 | 0 à 4 |
+| Clavier | USB | Zone | Canal | Luminosité | Vitesse |
+| --- | --- | --- | --- | --- | --- |
+| EVO80 | `36B0:300E` | Touches | 3 (`rgb_matrix`) | 0 à 180 en écriture, lue sur 0 à 255 | 0 à 255 |
+| EVO80 | | Barre lumineuse | 2 (`rgblight`) | 0 à 105 | 0 à 4 |
+| NUT65 | `342D:E51A` | Touches | 3 (`rgb_matrix`) | 0 à 255 | 0 à 255 |
 
-Les commandes utilisées sont `0x07` (écrire), `0x08` (lire) et `0x09` (enregistrer).
+Pour ajouter un clavier : une définition dans `src/keyboards/` (voir `evo80.js`), son entrée dans `src/keyboards/index.js` et son identifiant constructeur dans `main.js`.
 
 ## Licence
 

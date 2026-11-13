@@ -1,8 +1,8 @@
 {
   "name": "capglow",
   "productName": "Capglow",
-  "version": "0.2.0",
-  "description": "Contrôle de l'éclairage RGB du clavier Evoworks EVO80 (projet non officiel)",
+  "version": "0.3.0",
+  "description": "Contrôle de l'éclairage RGB des claviers Evoworks EVO80 et Weikav NUT65 (projet non officiel)",
   "main": "main.js",
   "scripts": {
     "postinstall": "node scripts/vendor-three.js",

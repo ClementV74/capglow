@@ -1,10 +1,11 @@
-const { app, BrowserWindow, Menu, Tray, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, ipcMain, screen, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const installer = require('./installer');
 
-const EVO_VENDOR = 0x36b0;
-const EVO_WIRED = 0x300e;
+// Identifiants constructeur des claviers pris en charge (à garder en phase avec src/keyboards/).
+const KNOWN_VENDORS = [0x36b0, 0x342d];
+const REPO_URL = 'https://github.com/ClementV74/capglow';
 const HIDDEN_ARG = '--hidden';
 const ICON = path.join(__dirname, 'build', 'icon.png');
 
@@ -14,6 +15,9 @@ let quitting = false;
 
 // Même identifiant que les raccourcis, pour que Windows les associe à la fenêtre.
 app.setAppUserModelId('io.github.capglow');
+
+// En développement, données séparées : on peut lancer les sources à côté du Capglow installé.
+if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'Capglow (développement)'));
 
 if (process.argv.includes('--uninstall')) {
   // Désinstallation demandée depuis « Applications installées ».
@@ -90,15 +94,25 @@ function createWindow() {
 
   const ses = win.webContents.session;
 
-  // WebHID : on n'autorise que les périphériques Evoworks, sans popup de choix.
+  // WebHID : on n'autorise que les claviers pris en charge, sans popup de choix.
   ses.setPermissionCheckHandler((_wc, permission) => permission === 'hid');
   ses.setDevicePermissionHandler((details) =>
-    details.deviceType === 'hid' && details.device.vendorId === EVO_VENDOR);
+    details.deviceType === 'hid' && KNOWN_VENDORS.includes(details.device.vendorId));
   ses.on('select-hid-device', (event, details, callback) => {
     event.preventDefault();
-    const wired = details.deviceList.find(
-      (d) => d.vendorId === EVO_VENDOR && d.productId === EVO_WIRED);
-    callback(wired ? wired.deviceId : '');
+    const keyboard = details.deviceList.find((d) => KNOWN_VENDORS.includes(d.vendorId));
+    callback(keyboard ? keyboard.deviceId : '');
+  });
+
+  // Le diagnostic exporté va directement dans le dossier Téléchargements.
+  ses.on('will-download', (_e, item) => {
+    item.setSavePath(path.join(app.getPath('downloads'), item.getFilename()));
+  });
+
+  // Les liens du dépôt s'ouvrent dans le navigateur ; tout le reste est bloqué.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith(REPO_URL)) shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   if (process.env.CAPGLOW_DEBUG) {
@@ -115,7 +129,11 @@ function createWindow() {
   });
 
   win.setMenu(null);
-  win.loadFile(path.join(__dirname, 'src', 'index.html'));
+  // En développement, CAPGLOW_SIMULATE=<clavier> remplace le matériel par un clavier simulé.
+  const query = {};
+  if (!app.isPackaged && process.env.CAPGLOW_SIMULATE) query.simulate = process.env.CAPGLOW_SIMULATE;
+  if (!app.isPackaged) query.dev = '1';
+  win.loadFile(path.join(__dirname, 'src', 'index.html'), { query });
 }
 
 function showWindow() {

@@ -1,38 +1,28 @@
-// Couche de communication VIA (QMK Raw HID) pour l'EVO80.
-// Protocole vérifié sur le clavier : VIA v12, rapports de 32 octets,
-// page d'usage 0xFF60 / usage 0x61, uniquement en filaire (PID 0x300E).
+// Communication VIA (QMK Raw HID) avec les claviers pris en charge (voir src/keyboards/).
+// Rapports de 32 octets sur l'interface « page d'usage 0xFF60 / usage 0x61 ».
+// Seules les commandes VIA standard d'éclairage sont utilisées : lire, écrire, enregistrer.
 
-export const VENDOR = 0x36b0;
-export const PID_WIRED = 0x300e;
-export const PID_DONGLE = 0x3002;
+import { KEYBOARDS, identify } from './keyboards/index.js';
 
 const CMD_GET_PROTOCOL = 0x01;
 const CMD_SET = 0x07;
 const CMD_GET = 0x08;
 const CMD_SAVE = 0x09;
+const UNHANDLED = 0xff;
 
-export const CH_LOGO = 2;   // id_qmk_rgblight
-export const CH_KEYS = 3;   // id_qmk_rgb_matrix
+// Avant la version 11 du protocole, les commandes 0x07/0x08 n'ont pas le même format :
+// on refuse d'écrire plutôt que d'envoyer une commande mal interprétée.
+const MIN_PROTOCOL = 11;
 
-const VAL_BRIGHTNESS = 1;
-const VAL_EFFECT = 2;
-const VAL_SPEED = 3;
-const VAL_COLOR = 4;
+const VALUE = { brightness: 1, effect: 2, speed: 3, color: 4 };
 
-// Le firmware renvoie la luminosité des touches sur 0-255 mais l'écrit sur 0-180.
-export const KEYS_MAX_BRIGHTNESS = 180;
-export const LOGO_MAX_BRIGHTNESS = 105;
-export const KEYS_MAX_SPEED = 255;
-export const LOGO_MAX_SPEED = 4;
+const isVia = (d) => d.collections.some((c) => c.usagePage === 0xff60 && c.usage === 0x61);
 
-const isVia = (d) =>
-  d.vendorId === VENDOR &&
-  d.collections.some((c) => c.usagePage === 0xff60 && c.usage === 0x61);
-
-export class Evo80 extends EventTarget {
+export class ViaKeyboard extends EventTarget {
   constructor() {
     super();
     this.device = null;
+    this.keyboard = null;
     this.queue = Promise.resolve();
     this.pending = null;
     this.onReport = this.onReport.bind(this);
@@ -43,37 +33,43 @@ export class Evo80 extends EventTarget {
     });
   }
 
-  // Retourne 'wired' | 'dongle' | 'none'
   async scan() {
-    const devices = await navigator.hid.getDevices();
-    const wired = devices.find((d) => d.productId === PID_WIRED && isVia(d));
+    const found = (await navigator.hid.getDevices())
+      .filter(isVia)
+      .map((device) => ({ device, ...identify(device) }))
+      .filter((d) => d.keyboard);
+
+    const wired = found.find((d) => d.mode === 'wired');
     if (wired) {
-      if (wired !== this.device) await this.attach(wired);
-      return 'wired';
+      if (wired.device !== this.device) await this.attach(wired.device, wired.keyboard);
+      return;
     }
     this.drop();
-    const state = devices.some((d) => d.vendorId === VENDOR) ? 'dongle' : 'none';
-    this.emit('status', { state });
-    return state;
+    const dongle = found.find((d) => d.mode === 'dongle');
+    this.emit('status', dongle ? { state: 'dongle', keyboard: dongle.keyboard } : { state: 'none' });
   }
 
   async request() {
     try {
       await navigator.hid.requestDevice({
-        filters: [{ vendorId: VENDOR, usagePage: 0xff60, usage: 0x61 }],
+        filters: KEYBOARDS.map((k) => ({ vendorId: k.usb.vendorId, usagePage: 0xff60, usage: 0x61 })),
       });
     } catch { /* l'utilisateur a annulé */ }
     return this.scan();
   }
 
-  async attach(device) {
+  async attach(device, keyboard) {
     this.drop();
     if (!device.opened) await device.open();
     device.addEventListener('inputreport', this.onReport);
     this.device = device;
-    const r = await this.send([CMD_GET_PROTOCOL]);
-    const protocol = (r[1] << 8) | r[2];
-    this.emit('status', { state: 'wired', protocol });
+    this.keyboard = keyboard;
+    let protocol = 0;
+    try {
+      const r = await this.send([CMD_GET_PROTOCOL]);
+      protocol = (r[1] << 8) | r[2];
+    } catch { /* traité ci-dessous comme non pris en charge */ }
+    this.emit('status', { state: 'connected', keyboard, protocol, supported: protocol >= MIN_PROTOCOL });
   }
 
   drop() {
@@ -81,6 +77,7 @@ export class Evo80 extends EventTarget {
     this.device.removeEventListener('inputreport', this.onReport);
     this.device.close().catch(() => {});
     this.device = null;
+    this.keyboard = null;
     this.emit('status', { state: 'none' });
   }
 
@@ -89,9 +86,9 @@ export class Evo80 extends EventTarget {
   }
 
   onReport(e) {
-    if (!this.pending) return;
     const data = new Uint8Array(e.data.buffer);
-    this.pending.resolve(data);
+    // Une réponse VIA reprend la commande envoyée (ou 0xFF si elle n'est pas gérée).
+    if (this.pending && (data[0] === this.pending.cmd || data[0] === UNHANDLED)) this.pending.resolve(data);
   }
 
   // Les commandes sont sérialisées : une requête, une réponse.
@@ -105,6 +102,7 @@ export class Evo80 extends EventTarget {
         reject(new Error('Le clavier ne répond pas'));
       }, 800);
       this.pending = {
+        cmd: bytes[0],
         resolve: (d) => { clearTimeout(timer); this.pending = null; resolve(d); },
       };
       this.device.sendReport(0, buf).catch((err) => {
@@ -116,34 +114,47 @@ export class Evo80 extends EventTarget {
     return p;
   }
 
-  async get(channel, value) {
-    const r = await this.send([CMD_GET, channel, value]);
-    if (r[0] === 0xff) throw new Error('Valeur non prise en charge');
-    return r.slice(3, 5);
+  async get(zone, value) {
+    const r = await this.send([CMD_GET, zone.channel, VALUE[value]]);
+    if (r[0] === UNHANDLED || r[1] !== zone.channel || r[2] !== VALUE[value]) {
+      throw new Error('Réponse inattendue du clavier');
+    }
+    return [r[3], r[4]];
   }
 
-  async readZone(channel) {
-    const [b] = await this.get(channel, VAL_BRIGHTNESS);
-    const [effect] = await this.get(channel, VAL_EFFECT);
-    const [speed] = await this.get(channel, VAL_SPEED);
-    const [hue, sat] = await this.get(channel, VAL_COLOR);
-    const brightness = channel === CH_KEYS
-      ? Math.round((b * KEYS_MAX_BRIGHTNESS) / 255)
-      : b;
-    return { brightness, effect, speed, hue, sat };
+  async set(zone, value, ...data) {
+    const r = await this.send([CMD_SET, zone.channel, VALUE[value], ...data]);
+    if (r[0] === UNHANDLED) throw new Error('Réglage refusé par le clavier');
   }
 
-  setBrightness(ch, v) { return this.send([CMD_SET, ch, VAL_BRIGHTNESS, v]); }
-  setEffect(ch, v) { return this.send([CMD_SET, ch, VAL_EFFECT, v]); }
-  setSpeed(ch, v) { return this.send([CMD_SET, ch, VAL_SPEED, v]); }
-  setColor(ch, h, s) { return this.send([CMD_SET, ch, VAL_COLOR, h, s]); }
-
-  async writeZone(ch, z) {
-    await this.setEffect(ch, z.effect);
-    await this.setBrightness(ch, z.brightness);
-    await this.setSpeed(ch, z.speed);
-    await this.setColor(ch, z.hue, z.sat);
+  // Valeurs lues ramenées sur l'échelle d'écriture (certains firmwares lisent sur 0-255).
+  async readZone(zone) {
+    const [b] = await this.get(zone, 'brightness');
+    const [effect] = await this.get(zone, 'effect');
+    const [speed] = await this.get(zone, 'speed');
+    const [hue, sat] = await this.get(zone, 'color');
+    const readMax = zone.brightness.readMax ?? zone.brightness.max;
+    const brightness = Math.min(zone.brightness.max, Math.round((b * zone.brightness.max) / readMax));
+    return { brightness, effect, speed: Math.min(speed, zone.speed.max), hue, sat };
   }
 
-  save(ch) { return this.send([CMD_SAVE, ch]); }
+  async write(zone, field, z) {
+    if (field === 'color') return this.set(zone, 'color', z.hue, z.sat);
+    return this.set(zone, field, z[field]);
+  }
+
+  // Relit une valeur écrite : sur un clavier non testé, tout écart arrête les écritures.
+  async verify(zone, field, z) {
+    const read = await this.readZone(zone);
+    const same = field === 'color'
+      ? read.hue === z.hue && read.sat === z.sat
+      : Math.abs(read[field] - z[field]) <= (field === 'brightness' ? 2 : 0);
+    if (!same) throw new Error('Le clavier n’a pas appliqué le réglage comme prévu');
+  }
+
+  async writeZone(zone, z) {
+    for (const field of ['effect', 'brightness', 'speed', 'color']) await this.write(zone, field, z);
+  }
+
+  save(zone) { return this.send([CMD_SAVE, zone.channel]); }
 }

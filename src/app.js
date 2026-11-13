@@ -1,21 +1,18 @@
-import {
-  Evo80, CH_KEYS, CH_LOGO,
-  KEYS_MAX_BRIGHTNESS, LOGO_MAX_BRIGHTNESS, KEYS_MAX_SPEED, LOGO_MAX_SPEED,
-} from './hid.js';
-import { KEY_FAMILIES, KEY_EFFECTS, LOGO_EFFECTS, LOGO_OFF } from './effects.js';
+import { KEYBOARDS, keyboardById } from './keyboards/index.js';
+import { effectCatalog, OFF } from './effects.js';
 import { drawThumb } from './keyboard.js';
-import { ledRgb } from './led.js';
+import { ledRgb, setLedCalibration } from './led.js';
 import { Keyboard3D } from './keyboard3d.js';
-import { THEMES } from './themes.js';
 
 const $ = (id) => document.getElementById(id);
+const params = new URLSearchParams(location.search);
 
-const ZONES = {
-  keys: { ch: CH_KEYS, maxBrightness: KEYS_MAX_BRIGHTNESS, maxSpeed: KEYS_MAX_SPEED },
-  logo: { ch: CH_LOGO, maxBrightness: LOGO_MAX_BRIGHTNESS, maxSpeed: LOGO_MAX_SPEED },
-};
+// Développement : CAPGLOW_SIMULATE=<clavier> remplace le matériel par un clavier simulé.
+const simulated = keyboardById(params.get('simulate'));
+if (simulated) (await import('./simulator.js')).installSimulator(simulated);
+const { ViaKeyboard } = await import('./hid.js');
 
-// Couleurs nommées d'après leur rendu sur les LED du clavier (voir led.js) : [nom, teinte, saturation].
+// Couleurs nommées d'après leur rendu sur les LED de l'EVO80 (voir led.js) : [nom, teinte, saturation].
 const PALETTE = [
   ['Rouge', 0, 255], ['Corail', 5, 200], ['Ambre', 10, 240], ['Or', 17, 235], ['Citron vert', 30, 230], ['Vert', 85, 255],
   ['Menthe', 108, 170], ['Lagon', 128, 235], ['Azur', 150, 230], ['Bleu', 172, 230], ['Violet', 220, 220], ['Rose', 240, 180],
@@ -27,27 +24,25 @@ function ledCss(hue, sat) {
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
 
-const LOGO_BY_ID = new Map(LOGO_EFFECTS.map((e) => [e.id, e]));
-
 const state = {
+  keyboard: null,
+  catalogs: {},
   zone: 'keys',
+  values: {},
+  lastOn: {},
   connected: false,
+  readOnly: false,
   dirty: false,
-  keys: { effect: 42, brightness: 140, speed: 120, hue: 20, sat: 220 },
-  logo: { effect: 9, brightness: 90, speed: 2, hue: 20, sat: 220 },
-  lastOn: { keys: 1, logo: 9 },
   fxTab: null,
 };
 
-const evo = new Evo80();
+const via = new ViaKeyboard();
 const view = new Keyboard3D($('kb'));
 
-function effectFor(zone, id) {
-  if (zone === 'keys') return KEY_EFFECTS.get(id) ?? KEY_EFFECTS.get(1);
-  return id === 0 ? LOGO_OFF : (LOGO_BY_ID.get(id) ?? LOGO_EFFECTS[0]);
-}
+const zoneDef = (zone = state.zone) => state.keyboard.zones[zone];
+const current = () => state.values[state.zone];
+const effectFor = (zone, id) => (id === 0 ? OFF : state.catalogs[zone].byId.get(id) ?? OFF);
 const usesColor = (zone, id) => id !== 0 && effectFor(zone, id).color !== false;
-const current = () => state[state.zone];
 
 /* Préférences locales (coloris, profils) */
 
@@ -65,6 +60,76 @@ const storage = {
   },
 };
 
+/* Clavier affiché */
+
+// Catalogue d'effets d'une zone : effets QMK pour les touches, liste propre au clavier pour la barre.
+function catalogFor(zone) {
+  if (Array.isArray(zone.effects)) {
+    const byId = new Map([[0, { ...OFF, id: 0 }], ...zone.effects.map((e) => [e.id, e])]);
+    return { byId, families: [{ name: zone.label, effects: zone.effects }], idOf: new Map() };
+  }
+  return effectCatalog(zone.effects, zone.hideColor);
+}
+
+function defaultValues(zone) {
+  return {
+    effect: 1,
+    brightness: Math.round(zone.brightness.max * 0.7),
+    speed: Math.round(zone.speed.max / 2),
+    hue: 10,
+    sat: 240,
+  };
+}
+
+function showKeyboard(keyboard) {
+  if (state.keyboard === keyboard) return;
+  state.keyboard = keyboard;
+  storage.set('capglow.keyboard', keyboard.id);
+  state.catalogs = {};
+  state.values = {};
+  state.lastOn = {};
+  for (const [name, zone] of Object.entries(keyboard.zones)) {
+    state.catalogs[name] = catalogFor(zone);
+    state.values[name] = defaultValues(zone);
+    state.lastOn[name] = 1;
+  }
+  if (!keyboard.zones[state.zone]) state.zone = 'keys';
+  state.fxTab = null;
+  renderedGrid = '';
+
+  setLedCalibration(keyboard.ledCalibration);
+  view.setKeyboard(keyboard);
+  renderThemes();
+  applyTheme(storage.get(`capglow.theme.${keyboard.id}`, keyboard.defaultTheme));
+  renderKeyboardChrome();
+  renderProfiles();
+  render();
+}
+
+// Éléments qui dépendent du clavier : onglet de la barre, palette, piste de teinte, consignes.
+function renderKeyboardChrome() {
+  const kb = state.keyboard;
+  const bar = kb.zones.bar;
+  $('zone-tabs').hidden = !bar;
+  if (bar) $('bar-tab').textContent = bar.label;
+
+  document.querySelectorAll('.swatch').forEach((s) => { s.style.background = ledCss(Number(s.dataset.h), Number(s.dataset.s)); });
+  const hueStops = Array.from({ length: 13 }, (_, i) => ledCss((i / 12) * 255, 255));
+  $('hue').style.setProperty('--track', `linear-gradient(to right, ${hueStops.join(', ')})`);
+
+  $('themes-hint').textContent = `L’aperçu 3D reprend les couleurs de ton ${kb.name}.`;
+  $('notice-steps').replaceChildren(...wiredSteps(kb).map((text) => {
+    const li = document.createElement('li');
+    li.textContent = text;
+    return li;
+  }));
+}
+
+function wiredSteps(kb) {
+  if (kb.id === 'nut65') return ['Branche le câble USB-C.', 'Passe le clavier en mode filaire avec Fn + T.'];
+  return ['Débranche le dongle 2.4G.', 'Mets l’interrupteur du clavier sur la position câble.', 'Branche le câble USB-C.'];
+}
+
 /* Envoi au clavier : les changements rapprochés sont regroupés */
 
 const pending = new Map();
@@ -73,7 +138,7 @@ let flushTimer = null;
 function queueWrite(zone, field) {
   state.dirty = true;
   renderFooter();
-  if (!state.connected) return;
+  if (!state.connected || state.readOnly) return;
   pending.set(`${zone}:${field}`, { zone, field });
   flushTimer ??= setTimeout(flush, 35);
 }
@@ -83,52 +148,59 @@ async function flush() {
   const jobs = [...pending.values()];
   pending.clear();
   for (const { zone, field } of jobs) {
-    const z = state[zone];
-    const ch = ZONES[zone].ch;
     try {
-      if (field === 'effect') await evo.setEffect(ch, z.effect);
-      if (field === 'brightness') await evo.setBrightness(ch, z.brightness);
-      if (field === 'speed') await evo.setSpeed(ch, z.speed);
-      if (field === 'color') await evo.setColor(ch, z.hue, z.sat);
+      await via.write(zoneDef(zone), field, state.values[zone]);
+      // Clavier non testé sur du vrai matériel : chaque écriture est relue.
+      if (state.keyboard.experimental) await via.verify(zoneDef(zone), field, state.values[zone]);
     } catch (err) {
-      toast(`Réglage non envoyé : ${err.message}`, true);
+      enterReadOnly(err.message);
       return;
     }
   }
 }
 
+function enterReadOnly(reason) {
+  state.readOnly = true;
+  pending.clear();
+  toast(`Capglow arrête d’écrire dans le clavier : ${reason}`, true);
+  renderFooter();
+}
+
 /* Coloris */
 
+function renderThemes() {
+  $('themes').replaceChildren(...state.keyboard.themes.map((t) => {
+    const b = document.createElement('button');
+    b.className = 'theme-option';
+    b.dataset.id = t.id;
+    b.setAttribute('role', 'radio');
+
+    const swatch = document.createElement('span');
+    swatch.className = 'theme';
+    swatch.style.setProperty('--c1', t.case);
+    swatch.style.setProperty('--c2', t.mod);
+
+    const name = document.createElement('span');
+    name.className = 'theme-label';
+    name.textContent = t.name;
+    const finish = document.createElement('span');
+    finish.className = 'theme-finish';
+    finish.textContent = t.finish;
+    name.append(finish);
+
+    b.append(swatch, name);
+    b.addEventListener('click', () => applyTheme(t.id));
+    return b;
+  }));
+}
+
 function applyTheme(id) {
-  const theme = THEMES.find((t) => t.id === id) ?? THEMES[0];
+  const themes = state.keyboard.themes;
+  const theme = themes.find((t) => t.id === id) ?? themes[0];
   view.setTheme(theme);
   document.querySelectorAll('.theme-option').forEach((b) =>
     b.setAttribute('aria-checked', String(b.dataset.id === theme.id)));
-  storage.set('capglow.theme', theme.id);
-}
-
-for (const t of THEMES) {
-  const b = document.createElement('button');
-  b.className = 'theme-option';
-  b.dataset.id = t.id;
-  b.setAttribute('role', 'radio');
-
-  const swatch = document.createElement('span');
-  swatch.className = 'theme';
-  swatch.style.setProperty('--c1', t.case);
-  swatch.style.setProperty('--c2', t.mod);
-
-  const name = document.createElement('span');
-  name.className = 'theme-label';
-  name.textContent = t.name;
-  const finish = document.createElement('span');
-  finish.className = 'theme-finish';
-  finish.textContent = t.finish;
-  name.append(finish);
-
-  b.append(swatch, name);
-  b.addEventListener('click', () => applyTheme(t.id));
-  $('themes').append(b);
+  storage.set(`capglow.theme.${state.keyboard.id}`, theme.id);
 }
 
 /* Installation (version zip) */
@@ -194,6 +266,36 @@ loginSwitch.addEventListener('click', async () => {
   toast(applied ? 'Capglow se lancera au démarrage de Windows' : 'Lancement au démarrage désactivé');
 });
 
+// Diagnostic en lecture seule, à joindre à un signalement : rien n'est écrit dans le clavier.
+$('export-diagnostic').addEventListener('click', async () => {
+  const devices = await navigator.hid.getDevices();
+  const report = {
+    app: 'Capglow 0.3.0',
+    date: new Date().toISOString(),
+    devices: devices.map((d) => ({
+      name: d.productName,
+      vendorId: `0x${d.vendorId.toString(16).padStart(4, '0')}`,
+      productId: `0x${d.productId.toString(16).padStart(4, '0')}`,
+      collections: d.collections.map((c) => `0x${c.usagePage.toString(16)}/0x${c.usage.toString(16)}`),
+    })),
+    keyboard: state.connected ? state.keyboard.id : null,
+    protocol: state.protocol ?? null,
+    readOnly: state.readOnly,
+    zones: {},
+  };
+  if (state.connected) {
+    for (const [name, zone] of Object.entries(state.keyboard.zones)) {
+      try { report.zones[name] = await via.readZone(zone); } catch (err) { report.zones[name] = { error: err.message }; }
+    }
+  }
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
+  link.download = 'capglow-diagnostic.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast('Diagnostic exporté dans tes téléchargements');
+});
+
 /* Rendu de l'inspecteur */
 
 function render() {
@@ -202,7 +304,9 @@ function render() {
   const fx = effectFor(zone, z.effect);
 
   view.focus = zone;
-  view.set(effectFor('keys', state.keys.effect), state.keys, effectFor('logo', state.logo.effect), state.logo);
+  const bar = state.keyboard.zones.bar ? state.values.bar : null;
+  view.set(effectFor('keys', state.values.keys.effect), state.values.keys,
+    bar ? effectFor('bar', bar.effect) : null, bar);
 
   document.querySelectorAll('.seg').forEach((b) =>
     b.setAttribute('aria-selected', String(b.dataset.zone === zone)));
@@ -213,7 +317,7 @@ function render() {
   root.setProperty('--led', `color-mix(in srgb, ${led} 72%, white)`);
   root.setProperty('--led-soft', `color-mix(in srgb, ${led} 12%, transparent)`);
 
-  $('np-family').textContent = zone === 'keys' ? fx.family ?? 'Touches' : 'Barre lumineuse';
+  $('np-family').textContent = zone === 'keys' ? fx.family ?? zoneDef().label : zoneDef().label;
   $('np-name').textContent = fx.name;
 
   const on = z.effect !== 0;
@@ -227,15 +331,8 @@ function render() {
   renderFooter();
 }
 
-function families() {
-  return state.zone === 'keys'
-    ? KEY_FAMILIES
-    : [{ name: 'Barre lumineuse', effects: LOGO_EFFECTS }];
-}
-
-function familyOf(id) {
-  return families().find((f) => f.effects.some((e) => e.id === id))?.name;
-}
+const families = () => state.catalogs[state.zone].families;
+const familyOf = (id) => families().find((f) => f.effects.some((e) => e.id === id))?.name;
 
 function renderTabs() {
   const host = $('fx-tabs');
@@ -269,7 +366,7 @@ let renderedGrid = '';
 function renderEffects() {
   const host = $('fx-grid');
   const fam = families().find((f) => f.name === state.fxTab);
-  const key = `${state.zone}:${fam.name}`;
+  const key = `${state.keyboard.id}:${state.zone}:${fam.name}`;
   if (renderedGrid !== key) {
     renderedGrid = key;
     host.replaceChildren(...fam.effects.map((e) => {
@@ -310,7 +407,7 @@ function scheduleThumbs() {
       const ctx = canvas.getContext('2d');
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const fx = effectFor(state.zone, Number(b.dataset.id));
-      if (state.zone === 'keys') drawThumb(ctx, w, h, fx, c);
+      if (state.zone === 'keys') drawThumb(ctx, w, h, state.keyboard.layout, fx, c);
       else drawBarThumb(ctx, w, h, fx, c);
     });
   });
@@ -358,30 +455,33 @@ function renderColor() {
 
 function renderSliders() {
   const z = current();
-  const cfg = ZONES[state.zone];
+  const cfg = zoneDef();
   const on = z.effect !== 0;
   const bright = $('bright'), speed = $('speed');
-  bright.max = cfg.maxBrightness;
-  speed.max = cfg.maxSpeed;
+  bright.max = cfg.brightness.max;
+  speed.max = cfg.speed.max;
   bright.value = z.brightness;
   speed.value = z.speed;
   bright.disabled = speed.disabled = !on;
   for (const el of [bright, speed]) el.style.setProperty('--p', `${(el.value / el.max) * 100}%`);
-  $('bright-out').textContent = `${Math.round((z.brightness / cfg.maxBrightness) * 100)} %`;
-  $('speed-out').textContent = state.zone === 'logo'
-    ? `${z.speed + 1} sur ${cfg.maxSpeed + 1}`
-    : `${Math.round((z.speed / cfg.maxSpeed) * 100)} %`;
+  $('bright-out').textContent = `${Math.round((z.brightness / cfg.brightness.max) * 100)} %`;
+  // Peu de crans (barre de l'EVO80) : on affiche le cran plutôt qu'un pourcentage.
+  $('speed-out').textContent = cfg.speed.max < 10
+    ? `${z.speed + 1} sur ${cfg.speed.max + 1}`
+    : `${Math.round((z.speed / cfg.speed.max) * 100)} %`;
 }
 
 function renderFooter() {
   const note = $('foot-note');
-  note.classList.toggle('dirty', state.dirty);
+  note.classList.toggle('dirty', state.dirty && !state.readOnly);
   note.textContent = !state.connected
     ? 'Aperçu uniquement : aucun clavier connecté.'
-    : state.dirty
-      ? 'Pas encore enregistré dans le clavier.'
-      : 'Les réglages s’appliquent en direct.';
-  $('save').disabled = !(state.dirty && state.connected);
+    : state.readOnly
+      ? 'Lecture seule : Capglow n’écrit pas dans ce clavier.'
+      : state.dirty
+        ? 'Pas encore enregistré dans le clavier.'
+        : 'Les réglages s’appliquent en direct.';
+  $('save').disabled = !(state.dirty && state.connected && !state.readOnly);
 }
 
 /* Actions */
@@ -411,14 +511,9 @@ for (const [name, h, s] of PALETTE) {
   b.title = name;
   b.setAttribute('role', 'radio');
   b.setAttribute('aria-label', name);
-  b.style.background = ledCss(h, s);
   b.addEventListener('click', () => setColor(h, s));
   $('palette').append(b);
 }
-
-// La piste de teinte montre les couleurs telles que les LED les rendent.
-const hueStops = Array.from({ length: 13 }, (_, i) => ledCss((i / 12) * 255, 255));
-$('hue').style.setProperty('--track', `linear-gradient(to right, ${hueStops.join(', ')})`);
 
 $('hue').addEventListener('input', (e) => setColor(Number(e.target.value), current().sat));
 $('sat').addEventListener('input', (e) => setColor(current().hue, Number(e.target.value)));
@@ -450,8 +545,7 @@ $('save').addEventListener('click', async () => {
   $('save').disabled = true;
   try {
     await flush();
-    await evo.save(CH_KEYS);
-    await evo.save(CH_LOGO);
+    for (const zone of Object.values(state.keyboard.zones)) await via.save(zone);
     state.dirty = false;
     toast('Enregistré dans le clavier');
   } catch (err) {
@@ -467,18 +561,80 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => view.release(e.code));
 
-/* Profils */
+/* Profils
+   Ils sont communs à tous les claviers : l'effet est enregistré par son nom QMK, et la
+   luminosité et la vitesse en proportion (0 à 1), car chaque clavier a ses propres plages. */
 
 const PRESETS = [
-  { name: 'Braise', keys: { effect: 1, brightness: 150, speed: 100, hue: 10, sat: 240 }, logo: { effect: 9, brightness: 90, speed: 2, hue: 10, sat: 240 } },
-  { name: 'Lagon', keys: { effect: 26, brightness: 150, speed: 70, hue: 125, sat: 230 }, logo: { effect: 7, brightness: 80, speed: 1, hue: 125, sat: 230 } },
-  { name: 'Ciel étoilé', keys: { effect: 42, brightness: 140, speed: 110, hue: 160, sat: 150 }, logo: { effect: 7, brightness: 60, speed: 1, hue: 160, sat: 150 } },
-  { name: 'Arc-en-ciel', keys: { effect: 13, brightness: 160, speed: 90, hue: 0, sat: 255 }, logo: { effect: 1, brightness: 100, speed: 2, hue: 0, sat: 255 } },
-  { name: 'Nuit', keys: { effect: 1, brightness: 35, speed: 50, hue: 20, sat: 200 }, logo: { effect: 0, brightness: 0, speed: 0, hue: 20, sat: 200 } },
+  { name: 'Braise', keys: { fx: 'solid_color', brightness: 0.8, speed: 0.4, hue: 10, sat: 240 }, bar: { effect: 9, brightness: 0.85, speed: 0.5, hue: 10, sat: 240 } },
+  { name: 'Lagon', keys: { fx: 'hue_breathing', brightness: 0.8, speed: 0.3, hue: 125, sat: 230 }, bar: { effect: 7, brightness: 0.75, speed: 0.25, hue: 125, sat: 230 } },
+  { name: 'Ciel étoilé', keys: { fx: 'starlight', brightness: 0.75, speed: 0.45, hue: 160, sat: 150 }, bar: { effect: 7, brightness: 0.6, speed: 0.25, hue: 160, sat: 150 } },
+  { name: 'Arc-en-ciel', keys: { fx: 'cycle_left_right', brightness: 0.85, speed: 0.35, hue: 0, sat: 255 }, bar: { effect: 1, brightness: 0.95, speed: 0.5, hue: 0, sat: 255 } },
+  { name: 'Nuit', keys: { fx: 'solid_color', brightness: 0.2, speed: 0.2, hue: 20, sat: 200 }, bar: { effect: 0, brightness: 0, speed: 0, hue: 20, sat: 200 } },
 ];
-let profiles = storage.get('capglow.profiles', structuredClone(PRESETS));
+
+// Profils des versions 0.1 et 0.2 : numéros d'effet et plages de l'EVO80.
+function migrateProfile(p) {
+  if (p.keys.fx) return p;
+  const evo = keyboardById('evo80').zones;
+  return {
+    name: p.name,
+    keys: {
+      fx: evo.keys.effects[p.keys.effect] ?? (p.keys.effect === 0 ? 'none' : 'solid_color'),
+      brightness: p.keys.brightness / evo.keys.brightness.max,
+      speed: p.keys.speed / evo.keys.speed.max,
+      hue: p.keys.hue,
+      sat: p.keys.sat,
+    },
+    bar: p.logo && {
+      effect: p.logo.effect,
+      brightness: p.logo.brightness / evo.bar.brightness.max,
+      speed: p.logo.speed / evo.bar.speed.max,
+      hue: p.logo.hue,
+      sat: p.logo.sat,
+    },
+  };
+}
+
+let profiles = storage.get('capglow.profiles', structuredClone(PRESETS)).map(migrateProfile);
+storage.set('capglow.profiles', profiles);
+
+// Réglages d'un profil, convertis pour le clavier affiché.
+function profileValues(p) {
+  const kb = state.keyboard;
+  const scale = (zone, v) => ({
+    brightness: Math.round(v.brightness * zone.brightness.max),
+    speed: Math.round(v.speed * zone.speed.max),
+    hue: v.hue,
+    sat: v.sat,
+  });
+  const out = {
+    keys: {
+      ...scale(kb.zones.keys, p.keys),
+      effect: p.keys.fx === 'none' ? 0 : state.catalogs.keys.idOf.get(p.keys.fx) ?? state.catalogs.keys.idOf.get('solid_color'),
+    },
+  };
+  if (kb.zones.bar && p.bar) out.bar = { ...scale(kb.zones.bar, p.bar), effect: p.bar.effect };
+  return out;
+}
+
+function profileFromState() {
+  const kb = state.keyboard;
+  const share = (zone, v) => ({
+    brightness: v.brightness / zone.brightness.max,
+    speed: v.speed / zone.speed.max,
+    hue: v.hue,
+    sat: v.sat,
+  });
+  const keys = state.values.keys;
+  return {
+    keys: { ...share(kb.zones.keys, keys), fx: effectFor('keys', keys.effect).key ?? 'none' },
+    bar: kb.zones.bar ? { ...share(kb.zones.bar, state.values.bar), effect: state.values.bar.effect } : undefined,
+  };
+}
 
 const CLOSE_ICON = '<svg viewBox="0 0 8 8" aria-hidden="true"><path d="M1 1l6 6M7 1L1 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const RAINBOW_FAMILY = 'Arc-en-ciel';
 
 function renderProfiles() {
   $('profiles').replaceChildren(...profiles.map((p, i) => {
@@ -490,8 +646,8 @@ function renderProfiles() {
     b.title = `Appliquer « ${p.name} »`;
     const chip = document.createElement('span');
     chip.className = 'chip';
-    const rainbow = KEY_FAMILIES.find((f) => f.name === 'Arc-en-ciel').effects.some((e) => e.id === p.keys.effect);
-    chip.style.background = rainbow
+    const fx = effectFor('keys', profileValues(p).keys.effect);
+    chip.style.background = fx.family === RAINBOW_FAMILY && fx.color === false
       ? 'conic-gradient(#f55, #fd5, #5f8, #5cf, #a6f, #f55)'
       : ledCss(p.keys.hue, p.keys.sat);
     b.append(chip, document.createTextNode(p.name));
@@ -514,19 +670,24 @@ function renderProfiles() {
 }
 
 async function applyProfile(p) {
-  Object.assign(state.keys, p.keys);
-  Object.assign(state.logo, p.logo);
-  if (p.keys.effect) state.lastOn.keys = p.keys.effect;
-  if (p.logo.effect) state.lastOn.logo = p.logo.effect;
+  const values = profileValues(p);
+  for (const [zone, v] of Object.entries(values)) {
+    Object.assign(state.values[zone], v);
+    if (v.effect) state.lastOn[zone] = v.effect;
+  }
   state.dirty = true;
   state.fxTab = null;
   render();
-  if (state.connected) {
+  if (state.connected && !state.readOnly) {
     try {
-      await evo.writeZone(CH_KEYS, state.keys);
-      await evo.writeZone(CH_LOGO, state.logo);
+      for (const zone of Object.keys(values)) {
+        await via.writeZone(zoneDef(zone), state.values[zone]);
+        if (state.keyboard.experimental) {
+          for (const field of ['effect', 'brightness', 'speed', 'color']) await via.verify(zoneDef(zone), field, state.values[zone]);
+        }
+      }
     } catch (err) {
-      toast(`Profil non envoyé : ${err.message}`, true);
+      enterReadOnly(err.message);
       return;
     }
   }
@@ -540,46 +701,66 @@ $('profile-add').addEventListener('click', () => {
 $('name-dialog').addEventListener('close', () => {
   const name = $('profile-name').value.trim();
   if ($('name-dialog').returnValue !== 'ok' || !name) return;
-  profiles.push({ name, keys: { ...state.keys }, logo: { ...state.logo } });
+  profiles.push({ name, ...profileFromState() });
   storage.set('capglow.profiles', profiles);
   renderProfiles();
   toast(`Profil « ${name} » enregistré`);
 });
 
-/* Connexion */
+/* Connexion : le clavier branché est reconnu automatiquement */
 
-const STATUS_TEXT = {
-  wired: 'Connecté en filaire',
-  dongle: 'Dongle 2.4G : passe en filaire',
-  none: 'Aucun clavier détecté',
-};
+via.addEventListener('status', async (e) => {
+  const { state: status, keyboard, protocol, supported } = e.detail;
+  if (keyboard) showKeyboard(keyboard);
+  const kb = state.keyboard;
 
-evo.addEventListener('status', async (e) => {
-  const s = e.detail.state;
-  $('status').dataset.state = s;
-  $('status-text').textContent = STATUS_TEXT[s];
-  $('notice').hidden = s === 'wired';
-  $('notice-title').textContent = s === 'dongle' ? 'Passe ton EVO80 en filaire' : 'Branche ton EVO80 en filaire';
+  const label = $('status-text');
+  $('status').dataset.state = status === 'connected' ? 'wired' : status;
+  label.textContent = status === 'connected'
+    ? `${kb.brand} ${kb.name} connecté`
+    : status === 'dongle'
+      ? `${kb.name} en 2.4G : passe en filaire`
+      : 'Aucun clavier détecté';
+  if (status === 'connected' && kb.experimental) {
+    const badge = document.createElement('span');
+    badge.className = 'badge';
+    badge.textContent = 'expérimental';
+    badge.title = 'Prise en charge pas encore testée sur ce clavier';
+    label.append(' ', badge);
+  }
+  $('notice').hidden = status === 'connected';
+  $('notice-title').textContent = status === 'dongle'
+    ? `Passe ton ${kb.name} en filaire`
+    : 'Branche ton clavier en filaire';
 
   const wasConnected = state.connected;
-  state.connected = s === 'wired';
+  state.connected = status === 'connected';
+  state.protocol = protocol;
+  if (!state.connected) state.readOnly = false;
+
   if (state.connected && !wasConnected) {
-    try {
-      Object.assign(state.keys, await evo.readZone(CH_KEYS));
-      Object.assign(state.logo, await evo.readZone(CH_LOGO));
-      if (state.keys.effect) state.lastOn.keys = state.keys.effect;
-      if (state.logo.effect) state.lastOn.logo = state.logo.effect;
-      state.dirty = false;
-      state.fxTab = null;
-      toast('Réglages du clavier chargés');
-    } catch (err) {
-      toast(`Lecture du clavier impossible : ${err.message}`, true);
+    if (!supported) {
+      enterReadOnly(`protocole VIA ${protocol || 'inconnu'} non pris en charge`);
+    } else {
+      try {
+        for (const [name, zone] of Object.entries(kb.zones)) {
+          const read = await via.readZone(zone);
+          Object.assign(state.values[name], read);
+          if (read.effect) state.lastOn[name] = read.effect;
+        }
+        state.readOnly = false;
+        state.dirty = false;
+        state.fxTab = null;
+        toast('Réglages du clavier chargés');
+      } catch (err) {
+        enterReadOnly(`lecture impossible (${err.message})`);
+      }
     }
   }
   render();
 });
 
-$('retry').addEventListener('click', () => evo.request());
+$('retry').addEventListener('click', () => via.request());
 
 let toastTimer;
 function toast(message, isError = false) {
@@ -591,12 +772,19 @@ function toast(message, isError = false) {
   toastTimer = setTimeout(() => el.classList.remove('show'), isError ? 4200 : 2200);
 }
 
-/* Démarrage */
+/* Démarrage : on affiche le dernier clavier utilisé en attendant la détection */
 
-applyTheme(storage.get('capglow.theme', 'cream'));
-renderProfiles();
-render();
+showKeyboard(keyboardById(storage.get('capglow.keyboard', 'evo80')) ?? KEYBOARDS[0]);
 initInstall();
-evo.scan();
+via.scan();
 // Certains ports USB n'émettent pas d'événement de connexion : on revérifie tant qu'on n'est pas connecté.
-setInterval(() => { if (!state.connected) evo.scan(); }, 2500);
+setInterval(() => { if (!state.connected) via.scan(); }, 2500);
+
+// Développement : afficher un autre clavier sans le brancher (window.__capglowPreview('nut65')).
+if (params.get('dev')) {
+  window.__capglowPreview = (id) => {
+    const kb = keyboardById(id);
+    if (kb && !state.connected) showKeyboard(kb);
+    return Boolean(kb);
+  };
+}

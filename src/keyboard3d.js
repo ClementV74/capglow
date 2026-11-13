@@ -1,8 +1,10 @@
-// Rendu 3D temps réel de l'EVO80 (TKL ANSI) avec three.js : boîtier, touches sculptées,
-// LED sous les touches et barre lumineuse.
+// Rendu 3D temps réel d'un clavier avec three.js : boîtier, touches sculptées, LED sous les
+// touches et élément lumineux du boîtier.
 //
 // Le clavier est modélisé dans le repère de sa disposition : x = ux, z = uy (une unité = une
-// touche, soit 19,05 mm), y vers le haut avec le dessus du boîtier à y = 0.
+// touche, soit 19,05 mm), y vers le haut avec le dessus du boîtier à y = 0. Ce qui change d'un
+// clavier à l'autre vient de sa définition (src/keyboards/) : `layout` pour les touches,
+// `model` pour le boîtier.
 
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
@@ -13,7 +15,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { KEYS, TOTAL_W, TOTAL_H, keyColors } from './keyboard.js';
+import { keyColors } from './keyboard.js';
 import { ledRgb } from './led.js';
 
 const { degToRad: rad, lerp, clamp, smootherstep } = THREE.MathUtils;
@@ -21,21 +23,8 @@ const wrap = (h) => ((h % 1) + 1) % 1;
 
 /* Dimensions */
 
-// Emprise du boîtier : les touches affleurent presque les bords, sauf à l'avant.
-const CASE = { left: -0.28, right: TOTAL_W + 0.28, back: -0.26, front: TOTAL_H + 0.42 };
-const FRONT_H = 0.85;       // hauteur du boîtier à l'avant
-const TILT = rad(6.5);      // angle de frappe
 const WELL_DEPTH = 0.3;
-
-// Découpes du boîtier autour des groupes de touches, avec un léger jeu.
-const PAD = 0.07;
-const WELLS = [
-  // Les trois rangées du haut sur toute la largeur, puis le bloc principal.
-  [[-PAD, -PAD], [TOTAL_W + PAD, -PAD], [TOTAL_W + PAD, 3 + PAD], [15 + PAD, 3 + PAD], [15 + PAD, 6 + PAD], [-PAD, 6 + PAD]],
-  // Les flèches, en T inversé.
-  [[16.25 - PAD, 4 - PAD], [17.25 + PAD, 4 - PAD], [17.25 + PAD, 5 - PAD], [18.25 + PAD, 5 - PAD],
-    [18.25 + PAD, 6 + PAD], [15.25 - PAD, 6 + PAD], [15.25 - PAD, 5 - PAD], [16.25 - PAD, 5 - PAD]],
-];
+const WELL_PAD = 0.07;      // jeu entre les touches et le bord des découpes du boîtier
 
 const CAP_GAP = 0.05;
 const CAP_H = 0.45;
@@ -45,22 +34,21 @@ const CAP_TRAVEL = 0.16;
 // Rétrécissement du sommet par rapport à la base : plus marqué à l'avant, comme un profil Cherry.
 const CAP_INSET = { side: 0.14, back: 0.05, front: 0.2 };
 
-// Fenêtre de la barre lumineuse, encastrée dans le boîtier sous Delete / End / PgDn.
-const BAR = { x: 16.75, z: 3.4, w: 2.9, d: 0.36 };
+// Emprise du boîtier d'un clavier : sa disposition, entourée des marges de son modèle.
+function caseBounds({ layout, model }) {
+  return {
+    left: -model.bezel.left,
+    right: layout.width + model.bezel.right,
+    back: -model.bezel.back,
+    front: layout.height + model.bezel.front,
+    height: model.frontHeight,
+    tilt: rad(model.tilt),
+  };
+}
 
 /* Caméra */
 
-// Points de vue : orientation de la caméra et boîte à cadrer.
-const VIEWS = {
-  keys: {
-    yaw: 0, pitch: rad(50),
-    box: new THREE.Box3(new THREE.Vector3(CASE.left, -FRONT_H, CASE.back), new THREE.Vector3(CASE.right, CAP_TOP, CASE.front)),
-  },
-  logo: {
-    yaw: rad(12), pitch: rad(46),
-    box: new THREE.Box3(new THREE.Vector3(BAR.x - 3.2, -0.2, BAR.z - 2.4), new THREE.Vector3(BAR.x + 2.2, CAP_TOP, BAR.z + 2.6)),
-  },
-};
+const KEYS_PITCH = rad(50);
 // Place réservée à l'interface posée sur la scène (onglets en haut, légende en bas), en pixels CSS.
 const MARGIN = { top: 64, side: 36, bottom: 118 };
 const PARALLAX = { yaw: rad(3.5), pitch: rad(2) };
@@ -73,6 +61,21 @@ const SPILL = 0.5;          // part de la lumière des LED renvoyée sur le clav
 const HALO_REACH = 0.3;     // distance sur laquelle la lumière d'une LED s'éteint autour de sa touche
 // Hauteur (0 à la base, 1 au sommet) jusqu'à laquelle la touche de devant cache la jupe.
 const HIDDEN_SKIRT = 0.36;
+// LED orientées vers l'utilisateur : la lumière sort à l'avant de la touche. Son halo est décalé
+// d'autant, et la jupe avant s'éclaire même sans touche devant elle.
+const SOUTH = { shift: 0.14, skirt: 0.12 };
+// Lueur d'un élément lumineux que l'application ne pilote pas : un blanc neutre et discret.
+const IDLE_GLOW = 0.22;
+
+/* Finitions du boîtier */
+
+// Anodisé : satiné, légèrement métallique. Laqué : peinture lisse sous vernis.
+// Électrophorèse : peinture mate, sans reflet métallique.
+const FINISHES = {
+  'Anodisé': { metalness: 0.55, roughness: 0.42, clearcoat: 0 },
+  'Laqué': { metalness: 0, roughness: 0.4, clearcoat: 0.7 },
+  'Électrophorèse': { metalness: 0, roughness: 0.55, clearcoat: 0 },
+};
 
 /* Géométries */
 
@@ -95,6 +98,21 @@ const rect = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
 const capsule = (w, d, inset = 0) =>
   roundedOutline(new THREE.Shape(), rect(-w / 2 + inset, -d / 2 + inset, w / 2 - inset, d / 2 - inset), d / 2 - inset);
 
+// Écarte de `pad`, vers l'extérieur, un contour à angles droits.
+function grow(points, pad) {
+  const next = (i) => points[(i + 1) % points.length];
+  const turn = Math.sign(points.reduce((sum, [x, y], i) => sum + x * next(i)[1] - next(i)[0] * y, 0));
+  return points.map(([x, y], i) => {
+    const [px, py] = points.at(i - 1);
+    const [nx, ny] = next(i);
+    // Chaque sommet recule le long de la normale de ses deux arêtes.
+    return [
+      x + (Math.sign(y - py) + Math.sign(ny - y)) * turn * pad,
+      y - (Math.sign(x - px) + Math.sign(nx - x)) * turn * pad,
+    ];
+  });
+}
+
 // Extrude vers le bas un contour tracé dans le plan (x, z), arêtes chanfreinées, sommet à y = top.
 function extrudeDown(shape, height, top, bevel) {
   const geo = new THREE.ExtrudeGeometry(shape, {
@@ -107,21 +125,19 @@ function extrudeDown(shape, height, top, bevel) {
 
 // Boîtier : un bloc percé des découpes des touches. Le dessous est rallongé vers l'arrière
 // pour rester à plat sur le bureau une fois le clavier incliné.
-function caseGeometry() {
-  const outline = roundedOutline(new THREE.Shape(), rect(CASE.left, CASE.back, CASE.right, CASE.front), 0.4);
-  for (const well of WELLS) outline.holes.push(roundedOutline(new THREE.Path(), well, 0.1));
-  const geo = extrudeDown(outline, FRONT_H, 0, 0.025);
+function caseGeometry(box, model) {
+  const outline = roundedOutline(new THREE.Shape(), rect(box.left, box.back, box.right, box.front), model.cornerRadius);
+  for (const well of model.wells) outline.holes.push(roundedOutline(new THREE.Path(), grow(well, WELL_PAD), 0.1));
+  const geo = extrudeDown(outline, box.height, 0, 0.025);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
-    if (pos.getY(i) < -FRONT_H / 2) pos.setY(i, pos.getY(i) - (CASE.front - pos.getZ(i)) * Math.tan(TILT));
+    if (pos.getY(i) < -box.height / 2) pos.setY(i, pos.getY(i) - (box.front - pos.getZ(i)) * Math.tan(box.tilt));
   }
   return toCreasedNormals(geo, rad(35));
 }
 
-// Touche : une boîte arrondie au sommet resserré et légèrement creusé. Une géométrie par largeur.
-const capGeometries = new Map();
+// Touche : une boîte arrondie au sommet resserré et légèrement creusé.
 function capGeometry(w) {
-  if (capGeometries.has(w)) return capGeometries.get(w);
   const bw = w - CAP_GAP, bd = 1 - CAP_GAP;
   const box = new RoundedBoxGeometry(bw, CAP_H, bd, 3, 0.08);
   box.deleteAttribute('normal');
@@ -144,7 +160,6 @@ function capGeometry(w) {
     n.x -= Math.sign(pos.getX(i)) * 0.3;
     normal.setXYZ(i, ...n.normalize());
   }
-  capGeometries.set(w, geo);
   return geo;
 }
 
@@ -163,17 +178,17 @@ function capTop(w) {
 // les UV d'une légende sont simplement sa position sur le clavier.
 const ATLAS_PPU = 160;
 
-function legendAtlas() {
+function legendAtlas(layout) {
   const canvas = document.createElement('canvas');
-  canvas.width = TOTAL_W * ATLAS_PPU;
-  canvas.height = TOTAL_H * ATLAS_PPU;
+  canvas.width = layout.width * ATLAS_PPU;
+  canvas.height = layout.height * ATLAS_PPU;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = '#fff';
   ctx.textBaseline = 'top';
   const font = (size) => `700 ${size * ATLAS_PPU}px Bahnschrift, "Segoe UI", sans-serif`;
-  for (const k of KEYS) {
+  for (const k of layout.keys) {
     if (!k.label) continue;
     const top = capTop(k.w);
     const size = k.label.length > 1 ? 0.19 : 0.32;
@@ -181,7 +196,7 @@ function legendAtlas() {
     ctx.font = font(size);
     const width = ctx.measureText(k.label).width;
     if (width > room) ctx.font = font((size * room) / width);
-    // En haut à gauche, comme sur les touches de l'EVO80.
+    // En haut à gauche de la touche.
     const x = k.ux + k.w / 2 - top.w / 2 + 0.04;
     const y = k.uy + 0.5 + top.z - top.d / 2 + 0.05;
     ctx.fillText(k.label, x * ATLAS_PPU, y * ATLAS_PPU);
@@ -191,12 +206,12 @@ function legendAtlas() {
   return texture;
 }
 
-function legendGeometry(k) {
+function legendGeometry(k, layout) {
   const top = capTop(k.w);
   const geo = new THREE.PlaneGeometry(top.w, top.d).rotateX(-Math.PI / 2).translate(0, CAP_H / 2 + 0.002, top.z);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
-    geo.attributes.uv.setXY(i, (k.ux + k.w / 2 + pos.getX(i)) / TOTAL_W, 1 - (k.uy + 0.5 + pos.getZ(i)) / TOTAL_H);
+    geo.attributes.uv.setXY(i, (k.ux + k.w / 2 + pos.getX(i)) / layout.width, 1 - (k.uy + 0.5 + pos.getZ(i)) / layout.height);
   }
   return geo;
 }
@@ -217,21 +232,21 @@ function softRectTexture(w, h, inset, blur) {
 
 /* Matériaux */
 
-// La lumière des LED ne fait qu'un liseré au bas de la jupe. Quand une touche est placée devant,
-// ce bas est caché : le liseré est remonté sur la face avant pour dépasser tout juste, et se lit
-// comme un trait de lumière entre les deux rangées.
-function capMaterial(hasKeyInFront) {
+// La lumière des LED ne fait qu'un liseré au bas de la jupe. Sur la face avant, il est remonté
+// de `frontSkirt` (0 à la base, 1 au sommet) : quand une touche placée devant cache ce bas, le
+// liseré dépasse tout juste et se lit comme un trait de lumière entre les deux rangées.
+function capMaterial(frontSkirt) {
   const material = new THREE.MeshStandardMaterial({ roughness: 0.68, emissiveIntensity: 6 });
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.hiddenSkirt = { value: hasKeyInFront ? HIDDEN_SKIRT : 0 };
+    shader.uniforms.frontSkirt = { value: frontSkirt };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-        uniform float hiddenSkirt;
+        uniform float frontSkirt;
         varying float vHeight;
         varying float vGlowBase;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vHeight = position.y / ${CAP_H} + 0.5;
-        vGlowBase = hiddenSkirt * smoothstep(0.2, 0.8, normal.z);`);
+        vGlowBase = frontSkirt * smoothstep(0.2, 0.8, normal.z);`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         varying float vHeight;
@@ -241,6 +256,10 @@ function capMaterial(hasKeyInFront) {
   };
   return material;
 }
+
+// Verre noir et brillant des fenêtres lumineuses.
+const darkGlass = (color = '#000') =>
+  new THREE.MeshPhysicalMaterial({ color, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.04 });
 
 // Halo d'une LED sur la plaque : plein sous la touche, il s'éteint sur HALO_REACH tout autour.
 const HALO = {
@@ -281,10 +300,10 @@ const ADD_GLOW = {
 export class Keyboard3D {
   constructor(canvas) {
     this.container = canvas.parentElement;
-    this.byCode = new Map(KEYS.map((k) => [k.code, k]));
+    this.keys = [];
+    this.byCode = new Map();
     this.hits = [];
     this.down = new Set();
-    this.travel = new Float32Array(KEYS.length);
     this.lastRealHit = -10;
     this.focus = 'keys';
     this.onAmbient = null;
@@ -307,8 +326,6 @@ export class Keyboard3D {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(28, 1, 1, 300);
     this.buildStudio();
-    this.buildKeyboard();
-    this.buildLightBar();
     this.buildPipeline();
 
     new ResizeObserver(() => this.resize()).observe(this.container);
@@ -321,19 +338,57 @@ export class Keyboard3D {
 
   /* Interface publique */
 
-  set(keyFx, keyState, logoFx, logoState) {
-    Object.assign(this, { keyFx, keyState, logoFx, logoState });
+  // Construit le modèle d'un clavier à partir de sa définition (src/keyboards/). Peut être rappelé
+  // quand un autre clavier est branché ; le coloris est à réappliquer ensuite avec setTheme.
+  setKeyboard(def) {
+    this.disposeKeyboard();
+    const { layout, model } = def;
+    const box = caseBounds(def);
+
+    this.zones = def.zones;
+    this.keys = layout.keys;
+    this.byCode = new Map(this.keys.map((k) => [k.code, k]));
+    this.hits = [];
+    this.down.clear();
+    this.travel = new Float32Array(this.keys.length);
+    this.theme = null;
+    this.zoom = 0;
+
+    this.keyboard = new THREE.Group();
+    this.scene.add(this.keyboard);
+    this.buildKeyboard(layout, model, box);
+    this.buildLight(model.light, box);
+
+    // Points de vue : orientation de la caméra et boîte à cadrer.
+    const corner = (x, y, z) => new THREE.Vector3(x, y, z);
+    this.views = {
+      keys: {
+        yaw: 0, pitch: KEYS_PITCH,
+        box: new THREE.Box3(corner(box.left, -box.height, box.back), corner(box.right, CAP_TOP, box.front)),
+      },
+    };
+    const closeUp = model.light.closeUp;
+    if (closeUp) {
+      const [x, z] = model.light.center;
+      this.views.bar = {
+        yaw: rad(closeUp.yaw), pitch: rad(closeUp.pitch),
+        box: new THREE.Box3(corner(x - closeUp.left, -0.2, z - closeUp.back), corner(x + closeUp.right, CAP_TOP, z + closeUp.front)),
+      };
+    }
+    this.ready = false;
+    this.frameViews();
+  }
+
+  // `barFx` et `barState` sont nuls quand le clavier n'a pas de barre lumineuse pilotable.
+  set(keyFx, keyState, barFx, barState) {
+    Object.assign(this, { keyFx, keyState, barFx, barState });
   }
 
   setTheme(theme) {
     this.theme = theme;
-    const lacquered = theme.finish === 'Laqué';
 
-    // Anodisé : satiné, légèrement métallique. Laqué : peinture lisse sous vernis.
     this.caseMaterial.color.set(theme.case);
-    this.caseMaterial.metalness = lacquered ? 0 : 0.55;
-    this.caseMaterial.roughness = lacquered ? 0.4 : 0.42;
-    this.caseMaterial.clearcoat = lacquered ? 0.7 : 0;
+    Object.assign(this.caseMaterial, FINISHES[theme.finish] ?? FINISHES['Anodisé']);
     // Plaque : une version sombre du boîtier, que seules les LED éclairent vraiment.
     this.plateMaterial.color.set(theme.case).multiplyScalar(0.12);
 
@@ -342,10 +397,10 @@ export class Keyboard3D {
       m: [theme.mod, theme.modInk],
       o: [theme.accent, theme.accentInk],
     };
-    KEYS.forEach((k, i) => this.caps[i].material.color.set(tones[k.tone][0]));
+    this.keys.forEach((k, i) => this.caps[i].material.color.set(tones[k.tone][0]));
     for (const tone in tones) this.inks[tone].color.set(tones[tone][1]);
 
-    this.barRim.color.set(theme.lightBar);
+    this.lightTrim.color.set(theme.lightBar);
   }
 
   press(code, now) {
@@ -397,53 +452,60 @@ export class Keyboard3D {
       new THREE.MeshStandardMaterial({ color: '#2a2c31', roughness: 0.85 }),
     );
     floor.receiveShadow = true;
-
-    const span = 1.4;
-    const contact = new THREE.Mesh(
-      new THREE.PlaneGeometry((CASE.right - CASE.left) * span, (CASE.front - CASE.back) * span).rotateX(-Math.PI / 2),
-      new THREE.MeshBasicMaterial({ color: '#000', alphaMap: softRectTexture(256, 128, (1 - 1 / span) / 2, 0.03), transparent: true, opacity: 0.8, depthWrite: false }),
-    );
-    contact.position.y = 0.01;
-    scene.add(floor, contact);
+    scene.add(floor);
   }
 
-  buildKeyboard() {
+  buildKeyboard(layout, model, box) {
+    const { keys } = layout;
+
     // Clavier incliné, centré sur l'origine de la scène, l'avant du boîtier posé au sol.
     const board = new THREE.Group();
-    board.rotation.x = TILT;
+    board.rotation.x = box.tilt;
     board.position.set(
-      -TOTAL_W / 2,
-      FRONT_H * Math.cos(TILT) + CASE.front * Math.sin(TILT),
-      (-TOTAL_H / 2) * Math.cos(TILT),
+      -layout.width / 2,
+      box.height * Math.cos(box.tilt) + box.front * Math.sin(box.tilt),
+      (-layout.height / 2) * Math.cos(box.tilt),
     );
     board.updateMatrixWorld();
     this.board = board;
-    this.scene.add(board);
+
+    // Ombre de contact, sous le boîtier.
+    const span = 1.4;
+    const contact = new THREE.Mesh(
+      new THREE.PlaneGeometry((box.right - box.left) * span, (box.front - box.back) * span).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: '#000', alphaMap: softRectTexture(256, 128, (1 - 1 / span) / 2, 0.03), transparent: true, opacity: 0.8, depthWrite: false }),
+    );
+    contact.position.y = 0.01;
+    this.keyboard.add(board, contact);
 
     this.caseMaterial = new THREE.MeshPhysicalMaterial({ clearcoatRoughness: 0.25 });
-    const body = new THREE.Mesh(caseGeometry(), this.caseMaterial);
+    const body = new THREE.Mesh(caseGeometry(box, model), this.caseMaterial);
     body.castShadow = body.receiveShadow = true;
 
     this.plateMaterial = new THREE.MeshStandardMaterial({ roughness: 0.6 });
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(TOTAL_W + 0.4, 0.1, TOTAL_H + 0.4), this.plateMaterial);
-    plate.position.set(TOTAL_W / 2, -WELL_DEPTH - 0.05, TOTAL_H / 2);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(layout.width + 0.4, 0.1, layout.height + 0.4), this.plateMaterial);
+    plate.position.set(layout.width / 2, -WELL_DEPTH - 0.05, layout.height / 2);
     plate.receiveShadow = true;
     board.add(body, plate);
 
-    const atlas = legendAtlas();
+    const atlas = legendAtlas(layout);
     const ink = () => new THREE.MeshStandardMaterial({
       alphaMap: atlas, transparent: true, depthWrite: false, roughness: 0.7,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     });
     this.inks = { a: ink(), m: ink(), o: ink() };
 
-    this.caps = KEYS.map((k) => {
-      const hasKeyInFront = KEYS.some((o) => o.uy === k.uy + 1 && o.ux < k.ux + k.w && o.ux + o.w > k.ux);
-      const cap = new THREE.Mesh(capGeometry(k.w), capMaterial(hasKeyInFront));
+    const south = model.leds === 'south';
+    const shapes = new Map(); // une géométrie par largeur de touche
+    this.caps = keys.map((k) => {
+      if (!shapes.has(k.w)) shapes.set(k.w, capGeometry(k.w));
+      const hasKeyInFront = keys.some((o) => o.uy === k.uy + 1 && o.ux < k.ux + k.w && o.ux + o.w > k.ux);
+      const frontSkirt = hasKeyInFront ? HIDDEN_SKIRT : south ? SOUTH.skirt : 0;
+      const cap = new THREE.Mesh(shapes.get(k.w), capMaterial(frontSkirt));
       cap.position.set(k.ux + k.w / 2, CAP_Y, k.uy + 0.5);
       cap.castShadow = cap.receiveShadow = true;
       if (k.label) {
-        const legend = new THREE.Mesh(legendGeometry(k), this.inks[k.tone]);
+        const legend = new THREE.Mesh(legendGeometry(k, layout), this.inks[k.tone]);
         legend.receiveShadow = true;
         cap.add(legend);
       }
@@ -455,11 +517,12 @@ export class Keyboard3D {
     this.halos = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
       new THREE.ShaderMaterial(HALO),
-      KEYS.length,
+      keys.length,
     );
     const matrix = new THREE.Matrix4();
+    const shift = south ? SOUTH.shift : 0;
     this.caps.forEach((cap, i) => {
-      matrix.makeScale(KEYS[i].w + HALO_REACH * 2, 1, 1 + HALO_REACH * 2).setPosition(cap.position.x, -WELL_DEPTH + 0.01, cap.position.z);
+      matrix.makeScale(keys[i].w + HALO_REACH * 2, 1, 1 + HALO_REACH * 2).setPosition(cap.position.x, -WELL_DEPTH + 0.01, cap.position.z + shift);
       this.halos.setMatrixAt(i, matrix);
       this.halos.setColorAt(i, this.led.setScalar(0));
     });
@@ -467,29 +530,77 @@ export class Keyboard3D {
     board.add(this.halos);
   }
 
-  // Fenêtre noire et brillante, avec sa fente lumineuse à gauche et son point à droite.
-  buildLightBar() {
-    const bar = new THREE.Group();
-    bar.position.set(BAR.x, 0, BAR.z);
+  // Élément lumineux du boîtier. `lightTrim` est son habillage, teinté par le coloris ;
+  // `barLight` est sa partie éclairée, quand l'application la pilote.
+  buildLight(light, box) {
+    this.barLight = null;
+    if (light.kind === 'insert') this.buildInsert(light);
+    if (light.kind === 'front-strip') this.buildFrontStrip(light, box);
+  }
 
-    this.barRim = new THREE.MeshPhysicalMaterial({ roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 });
-    const rim = new THREE.Mesh(extrudeDown(capsule(BAR.w, BAR.d), 0.1, 0.014, 0.012), this.barRim);
-    const glass = new THREE.Mesh(
-      extrudeDown(capsule(BAR.w, BAR.d, 0.035), 0.1, 0.02, 0.012),
-      new THREE.MeshPhysicalMaterial({ color: '#07080a', roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.04 }),
-    );
+  // Fenêtre noire et brillante encastrée dans le dessus du boîtier, avec sa fente lumineuse
+  // à gauche et son point à droite.
+  buildInsert(light) {
+    const [w, d] = light.size;
+    const bar = new THREE.Group();
+    bar.position.set(light.center[0], 0, light.center[1]);
+
+    this.lightTrim = new THREE.MeshPhysicalMaterial({ roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.1 });
+    const rim = new THREE.Mesh(extrudeDown(capsule(w, d), 0.1, 0.014, 0.012), this.lightTrim);
+    const glass = new THREE.Mesh(extrudeDown(capsule(w, d, 0.035), 0.1, 0.02, 0.012), darkGlass('#07080a'));
     rim.receiveShadow = glass.receiveShadow = true;
 
     // Toute la barre prend la même couleur, sans dégradé le long de la fente.
     this.barLight = new THREE.MeshStandardMaterial({ color: '#000', emissiveIntensity: 1.6 });
-    const slotW = BAR.w * 0.26, slotD = 0.07, y = 0.022;
+    const slotW = w * 0.26, slotD = 0.07, y = 0.022;
     const slot = new THREE.Mesh(new THREE.ShapeGeometry(capsule(slotW, slotD), 8).rotateX(-Math.PI / 2), this.barLight);
-    slot.position.set(-BAR.w / 2 + 0.22 + slotW / 2, y, 0);
+    slot.position.set(-w / 2 + 0.22 + slotW / 2, y, 0);
     const dot = new THREE.Mesh(new THREE.CircleGeometry(0.065, 24).rotateX(-Math.PI / 2), this.barLight);
-    dot.position.set(BAR.w / 2 - 0.2, y, 0);
+    dot.position.set(w / 2 - 0.2, y, 0);
 
     bar.add(rim, glass, slot, dot);
     this.board.add(bar);
+  }
+
+  // Bandeau en façade : une fenêtre sombre sur toute la largeur du boîtier, et derrière elle
+  // des segments diffusants. Si l'application ne le pilote pas, il garde une lueur blanche neutre.
+  buildFrontStrip(light, box) {
+    const w = box.right - box.left - light.margin * 2;
+    const strip = new THREE.Group();
+    strip.position.set((box.left + box.right) / 2, -light.top - light.height / 2, box.front);
+
+    this.lightTrim = darkGlass();
+    const outline = roundedOutline(new THREE.Shape(), rect(-w / 2, -light.height / 2, w / 2, light.height / 2), 0.05);
+    const glass = new THREE.Mesh(new THREE.ShapeGeometry(outline, 8), this.lightTrim);
+    glass.position.z = 0.003;
+    strip.add(glass);
+
+    const glow = new THREE.MeshStandardMaterial({ color: '#000', emissiveIntensity: 1.6 });
+    if (light.controllable) this.barLight = glow;
+    else glow.emissive.setScalar(IDLE_GLOW);
+
+    const gap = 0.12;
+    const segmentW = (w - gap * (light.segments + 1)) / light.segments;
+    const segment = new THREE.ShapeGeometry(capsule(segmentW, light.height * 0.3), 8);
+    for (let i = 0; i < light.segments; i++) {
+      const mesh = new THREE.Mesh(segment, glow);
+      mesh.position.set(-w / 2 + gap + segmentW / 2 + i * (segmentW + gap), 0, 0.006);
+      strip.add(mesh);
+    }
+    this.board.add(strip);
+  }
+
+  // Retire le clavier affiché et libère ses géométries, ses matériaux et ses textures.
+  disposeKeyboard() {
+    if (!this.keyboard) return;
+    this.scene.remove(this.keyboard);
+    this.keyboard.traverse((object) => {
+      object.geometry?.dispose();
+      object.material?.alphaMap?.dispose();
+      object.material?.dispose();
+      if (object.isInstancedMesh) object.dispose();
+    });
+    this.keyboard = null;
   }
 
   // L'image finale = la scène éclairée + le halo des LED. Le halo vient d'un second rendu,
@@ -544,7 +655,14 @@ export class Keyboard3D {
     // Le centre optique est décalé vers le milieu de la zone laissée libre par l'interface.
     this.camera.aspect = w / h;
     this.camera.setViewOffset(w, h, 0, (MARGIN.bottom - MARGIN.top) / 2, w, h);
-    for (const view of Object.values(VIEWS)) this.frameView(view, w, h);
+    this.frameViews();
+  }
+
+  // Cadre chaque point de vue du clavier affiché dans la zone libre.
+  frameViews() {
+    const w = this.container.clientWidth, h = this.container.clientHeight;
+    if (!w || !h || !this.views) return;
+    for (const view of Object.values(this.views)) this.frameView(view, w, h);
     this.ready = true;
   }
 
@@ -615,7 +733,7 @@ export class Keyboard3D {
     this.hits = this.hits.filter((h) => now - h.t < 2);
     if (now - this.lastRealHit < 2.5) return;
     if (!this.nextDemo || now > this.nextDemo) {
-      const k = KEYS[Math.floor(Math.random() * KEYS.length)];
+      const k = this.keys[Math.floor(Math.random() * this.keys.length)];
       this.hits.push({ i: k.i, x: k.x, y: k.y, t: now });
       this.nextDemo = now + 0.25 + Math.random() * 0.6;
     }
@@ -623,11 +741,12 @@ export class Keyboard3D {
 
   updateLeds(now) {
     const ks = this.keyState;
-    const speedN = ks.speed / 255;
+    const { brightness, speed } = this.zones.keys;
+    const speedN = ks.speed / speed.max;
     const t = this.reduced ? 1.7 : now * (0.25 + speedN * 1.75);
     const c = { hue: ks.hue / 255, sat: ks.sat / 255, speedN, hits: this.hits, now };
-    const bright = ks.effect === 0 ? 0 : ks.brightness / 180;
-    const colors = keyColors(this.keyFx, t, c, bright);
+    const bright = ks.effect === 0 ? 0 : ks.brightness / brightness.max;
+    const colors = keyColors(this.keys, this.keyFx, t, c, bright);
 
     const { led, halos, caps } = this;
     let ar = 0, ag = 0, ab = 0;
@@ -646,11 +765,13 @@ export class Keyboard3D {
   }
 
   updateLightBar(now) {
-    const ls = this.logoState;
-    const lt = this.reduced ? 1 : now * (0.4 + ls.speed * 0.45);
-    const lb = ls.effect === 0 ? 0 : ls.brightness / 105;
-    const [h, s, v] = this.logoFx.f(0, lt, { hue: ls.hue / 255, sat: ls.sat / 255 });
-    const [r, g, b] = ledRgb(wrap(h), s, v * lb);
+    const bs = this.barState;
+    if (!this.barLight || !bs) return;
+    const { brightness, speed } = this.zones.bar;
+    const bt = this.reduced ? 1 : now * (0.4 + (bs.speed / speed.max) * 1.8);
+    const bb = bs.effect === 0 ? 0 : bs.brightness / brightness.max;
+    const [h, s, v] = this.barFx.f(0, bt, { hue: bs.hue / 255, sat: bs.sat / 255 });
+    const [r, g, b] = ledRgb(wrap(h), s, v * bb);
     this.barLight.emissive.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
   }
 
@@ -663,12 +784,13 @@ export class Keyboard3D {
   }
 
   updateCamera(dt) {
-    const goal = this.focus === 'logo' ? 1 : 0;
+    // Sans barre lumineuse pilotable, il n'y a que la vue d'ensemble.
+    const a = this.views.keys, b = this.views.bar ?? a;
+    const goal = this.focus === 'bar' && this.views.bar ? 1 : 0;
     const step = this.reduced ? 1 : dt / ZOOM_SECONDS;
     this.zoom += clamp(goal - this.zoom, -step, step);
     this.sway.lerp(this.pointer, 1 - Math.exp(-dt * 4));
 
-    const a = VIEWS.keys, b = VIEWS.logo;
     const e = smootherstep(this.zoom, 0, 1);
     const yaw = lerp(a.yaw, b.yaw, e) + this.sway.x * PARALLAX.yaw;
     const pitch = lerp(a.pitch, b.pitch, e) - this.sway.y * PARALLAX.pitch;

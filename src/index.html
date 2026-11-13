@@ -16,9 +16,9 @@
   <div class="app">
     <main class="stage" id="stage" aria-label="Aperçu du clavier">
       <div class="stage-bar">
-        <div class="segmented" role="tablist" aria-label="Zone à régler">
+        <div class="segmented" id="zone-tabs" role="tablist" aria-label="Zone à régler">
           <button role="tab" class="seg" data-zone="keys" aria-selected="true">Touches</button>
-          <button role="tab" class="seg" data-zone="logo" aria-selected="false">Barre lumineuse</button>
+          <button role="tab" class="seg" data-zone="bar" aria-selected="false" id="bar-tab">Barre lumineuse</button>
         </div>
       </div>
 
@@ -40,13 +40,9 @@
       </div>
 
       <div class="notice" id="notice" hidden>
-        <h2 id="notice-title">Branche ton EVO80 en filaire</h2>
-        <ol>
-          <li>Débranche le dongle 2.4G.</li>
-          <li>Mets l’interrupteur du clavier sur la position câble.</li>
-          <li>Branche le câble USB-C.</li>
-        </ol>
-        <p>Tu peux préparer ton look en attendant : il sera envoyé dès la connexion.</p>
+        <h2 id="notice-title">Branche ton clavier en filaire</h2>
+        <ol id="notice-steps"></ol>
+        <p>En attendant, tu peux parcourir les effets dans l’aperçu.</p>
         <button class="btn btn-quiet" id="retry">Rechercher le clavier</button>
       </div>
 
@@ -139,7 +135,7 @@
 
     <section class="settings-section">
       <h3>Coloris de ton clavier</h3>
-      <p class="settings-hint">L’aperçu 3D reprend les couleurs de ton EVO80.</p>
+      <p class="settings-hint" id="themes-hint">L’aperçu 3D reprend les couleurs de ton clavier.</p>
       <div class="theme-grid" id="themes" role="radiogroup" aria-label="Coloris du clavier"></div>
     </section>
 
@@ -160,7 +156,16 @@
       <div><button class="btn btn-quiet" id="install-open">Installer Capglow</button></div>
     </section>
 
-    <p class="settings-foot">Capglow 0.2.0. Projet non officiel, sans lien avec Evoworks.</p>
+    <section class="settings-section">
+      <h3>Aide</h3>
+      <p class="settings-hint" id="keyboard-info">Claviers pris en charge : Evoworks EVO80, Weikav NUT65 (expérimental).</p>
+      <div class="settings-actions">
+        <button class="btn btn-quiet" id="export-diagnostic">Exporter un diagnostic</button>
+        <a class="btn btn-quiet" href="https://github.com/ClementV74/capglow/issues/new" target="_blank" rel="noopener">Signaler un problème</a>
+      </div>
+    </section>
+
+    <p class="settings-foot">Capglow 0.3.0. Projet non officiel, sans lien avec Evoworks ni Weikav.</p>
   </dialog>
 
   <script type="module" src="app.js"></script>
