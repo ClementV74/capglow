@@ -207,6 +207,22 @@ dialog.settings { width: 480px; padding: 0; }
 .notice li { margin: 3px 0; }
 .notice p { margin: 0 0 14px; color: var(--text-2); font-size: 12.5px; }
 
+.install-card {
+  position: absolute; top: 16px; right: 18px;
+  width: 340px;
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: rgb(26 28 33 / .96);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 50px rgb(0 0 0 / .5);
+  z-index: 4;
+}
+.install-card h2 { font-size: 15px; }
+.install-card p { margin: 8px 0 14px; color: var(--text-2); font-size: 12.5px; }
+.check { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--led); }
+.install-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
 .toast {
   position: absolute; left: 50%; bottom: 76px;
   transform: translate(-50%, 6px);

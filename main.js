@@ -1,5 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, ipcMain, screen } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
+const installer = require('./installer');
 
 const EVO_VENDOR = 0x36b0;
 const EVO_WIRED = 0x300e;
@@ -10,33 +12,50 @@ let win = null;
 let tray = null;
 let quitting = false;
 
-// Une seule instance : relancer Capglow ramène la fenêtre existante.
-if (!app.requestSingleInstanceLock()) {
+// Même identifiant que les raccourcis, pour que Windows les associe à la fenêtre.
+app.setAppUserModelId('io.github.capglow');
+
+if (process.argv.includes('--uninstall')) {
+  // Désinstallation demandée depuis « Applications installées ».
+  app.whenReady().then(() => installer.uninstall()).finally(() => app.quit());
+} else if (!app.requestSingleInstanceLock()) {
+  // Une seule instance : relancer Capglow ramène la fenêtre existante.
   app.quit();
 } else {
   app.on('second-instance', showWindow);
   app.whenReady().then(start);
 }
 
-// La version portable s'exécute depuis un dossier temporaire : on enregistre le vrai .exe.
-const LOGIN_ITEM = {
-  path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath,
-  args: [HIDDEN_ARG],
-};
+const loginItem = (exePath = process.execPath) => ({ path: exePath, args: [HIDDEN_ARG] });
 
 function openAtLogin() {
-  return app.getLoginItemSettings(LOGIN_ITEM).openAtLogin;
+  return app.getLoginItemSettings(loginItem()).openAtLogin;
 }
 
 function setOpenAtLogin(enabled) {
-  app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin: enabled });
+  app.setLoginItemSettings({ ...loginItem(), openAtLogin: enabled });
   updateTray();
   return openAtLogin();
+}
+
+async function installAndRelaunch(options) {
+  const exe = await installer.install(options);
+  // Le lancement au démarrage doit pointer vers la copie installée.
+  if (openAtLogin()) {
+    app.setLoginItemSettings({ ...loginItem(), openAtLogin: false });
+    app.setLoginItemSettings({ ...loginItem(exe), openAtLogin: true });
+  }
+  app.releaseSingleInstanceLock();
+  spawn(exe, [], { detached: true, stdio: 'ignore' }).unref();
+  quitting = true;
+  app.quit();
 }
 
 function start() {
   ipcMain.handle('settings:get', () => ({ openAtLogin: openAtLogin() }));
   ipcMain.handle('settings:set-open-at-login', (_e, enabled) => setOpenAtLogin(Boolean(enabled)));
+  ipcMain.handle('install:status', () => installer.status());
+  ipcMain.handle('install:run', (_e, options) => installAndRelaunch({ desktopShortcut: Boolean(options?.desktopShortcut) }));
 
   createWindow();
   updateTray();

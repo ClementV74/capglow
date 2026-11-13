@@ -1,13 +1,13 @@
 {
   "name": "capglow",
   "productName": "Capglow",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Contrôle de l'éclairage RGB du clavier Evoworks EVO80 (projet non officiel)",
   "main": "main.js",
   "scripts": {
     "postinstall": "node scripts/vendor-three.js",
     "start": "electron .",
-    "dist": "node scripts/vendor-three.js && electron-builder --win zip"
+    "dist": "node scripts/vendor-three.js && electron-builder --win"
   },
   "build": {
     "appId": "io.github.capglow",
@@ -15,11 +15,18 @@
     "files": [
       "main.js",
       "preload.js",
+      "installer.js",
       "src/**/*",
       "build/icon.png"
     ],
     "win": {
       "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
         {
           "target": "zip",
           "arch": [
@@ -34,7 +41,26 @@
       "output": "dist"
     },
     "disableAsarIntegrity": true,
-    "artifactName": "Capglow-${version}-windows-x64.${ext}"
+    "artifactName": "Capglow-${version}-windows-x64.${ext}",
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": false,
+      "shortcutName": "Capglow",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "uninstallDisplayName": "Capglow",
+      "artifactName": "Capglow-Setup-${version}.${ext}",
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
+    },
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^38.8.6",

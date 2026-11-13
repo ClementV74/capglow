@@ -131,6 +131,42 @@ for (const t of THEMES) {
   $('themes').append(b);
 }
 
+/* Installation (version zip) */
+
+const installCard = $('install-card');
+
+async function initInstall() {
+  const status = await window.capglow?.installStatus();
+  if (!status?.installable) return;
+  $('install-section').hidden = false;
+  if (!storage.get('capglow.installLater', false)) installCard.hidden = false;
+}
+
+$('install-later').addEventListener('click', () => {
+  installCard.hidden = true;
+  storage.set('capglow.installLater', true);
+  toast('Tu pourras installer Capglow plus tard depuis les paramètres');
+});
+
+$('install-open').addEventListener('click', () => {
+  settingsDialog.close();
+  installCard.hidden = false;
+});
+
+$('install-now').addEventListener('click', async () => {
+  const button = $('install-now');
+  button.disabled = true;
+  button.textContent = 'Installation…';
+  try {
+    // L'application redémarre depuis le dossier d'installation.
+    await window.capglow.install({ desktopShortcut: $('install-desktop').checked });
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = 'Installer';
+    toast(`Installation impossible : ${err.message}`, true);
+  }
+});
+
 /* Paramètres */
 
 const settingsDialog = $('settings-dialog');
@@ -560,6 +596,7 @@ function toast(message, isError = false) {
 applyTheme(storage.get('capglow.theme', 'cream'));
 renderProfiles();
 render();
+initInstall();
 evo.scan();
 // Certains ports USB n'émettent pas d'événement de connexion : on revérifie tant qu'on n'est pas connecté.
 setInterval(() => { if (!state.connected) evo.scan(); }, 2500);

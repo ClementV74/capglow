@@ -41,18 +41,21 @@
 
 ## Installation
 
-1. Télécharge `Capglow-…-windows-x64.zip` dans l'onglet [Releases](../../releases).
-2. Fais un clic droit sur le zip, puis « Extraire tout ».
-3. Lance `Capglow.exe` dans le dossier extrait. Aucun pilote ni installation n'est nécessaire.
+Télécharge la dernière version dans l'onglet [Releases](../../releases) :
 
-`Capglow.exe` est le binaire Electron officiel, non modifié : il passe Smart App Control et SmartScreen, qui bloquent les exécutables inconnus non signés.
+- **`Capglow-Setup-….exe`** : l'installateur. Il crée les raccourcis Bureau et menu Démarrer, et se désinstalle depuis « Applications installées ».
+- **`Capglow-…-windows-x64.zip`** : si Windows bloque l'installateur. Extrais le zip, lance `Capglow.exe`, puis clique sur « Installer » : Capglow s'installe tout seul au même endroit, avec ses raccourcis.
+
+Aucun pilote n'est nécessaire.
+
+> **Pourquoi deux versions ?** L'application n'est pas signée numériquement. La plupart des PC affichent simplement un avertissement SmartScreen pour l'installateur (« Informations complémentaires », puis « Exécuter quand même »). Mais si Smart App Control est actif, Windows 11 bloque tout installateur non signé. `Capglow.exe`, lui, est le binaire Electron d'origine, non modifié, et passe ce contrôle : c'est pour ça que la version zip peut s'installer elle-même.
 
 ## Développement
 
 ```sh
 npm install      # copie aussi Three.js dans src/vendor
 npm start        # lance l'application
-npm run dist     # génère l'exécutable portable dans dist/
+npm run dist     # génère l'installateur et le zip dans dist/
 ```
 
 Le code est en JavaScript sans framework :
@@ -67,7 +70,8 @@ Le code est en JavaScript sans framework :
 | `src/themes.js` | Coloris de l'EVO80 |
 | `src/led.js` | Calibrage des couleurs des LED pour l'aperçu |
 | `src/app.js` | Interface |
-| `preload.js` | Réglages exposés à l'interface (lancement au démarrage) |
+| `preload.js` | Réglages exposés à l'interface (démarrage, installation) |
+| `installer.js` | Installation et désinstallation depuis la version zip |
 | `scripts/vendor-three.js` | Copie de Three.js dans l'application |
 
 ### Protocole

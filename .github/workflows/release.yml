@@ -1,0 +1,34 @@
+# Compile l'installateur et le zip Windows, puis les ajoute à la Release publiée.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Compiler
+        run: npm run dist -- --publish never
+
+      - name: Ajouter les fichiers à la Release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/Capglow-Setup-*.exe dist/Capglow-*-windows-x64.zip --clobber

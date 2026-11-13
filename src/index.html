@@ -50,6 +50,19 @@
         <button class="btn btn-quiet" id="retry">Rechercher le clavier</button>
       </div>
 
+      <div class="install-card" id="install-card" role="dialog" aria-labelledby="install-title" hidden>
+        <h2 id="install-title">Installer Capglow sur ce PC</h2>
+        <p>Capglow tourne depuis le dossier téléchargé. Une fois installé, il est rangé avec tes applications et accessible depuis le menu Démarrer.</p>
+        <label class="check">
+          <input type="checkbox" id="install-desktop" checked>
+          <span>Ajouter aussi un raccourci sur le Bureau</span>
+        </label>
+        <div class="install-actions">
+          <button class="btn btn-quiet" id="install-later">Plus tard</button>
+          <button class="btn btn-primary" id="install-now">Installer</button>
+        </div>
+      </div>
+
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
     </main>
 
@@ -141,7 +154,13 @@
       </button>
     </section>
 
-    <p class="settings-foot">Capglow 0.1.1. Projet non officiel, sans lien avec Evoworks.</p>
+    <section class="settings-section" id="install-section" hidden>
+      <h3>Installation</h3>
+      <p class="settings-hint">Capglow tourne depuis le dossier téléchargé. Installe-le pour l’avoir dans le menu Démarrer et dans tes applications.</p>
+      <div><button class="btn btn-quiet" id="install-open">Installer Capglow</button></div>
+    </section>
+
+    <p class="settings-foot">Capglow 0.2.0. Projet non officiel, sans lien avec Evoworks.</p>
   </dialog>
 
   <script type="module" src="app.js"></script>
