@@ -28,12 +28,14 @@
 
 ## Installation
 
-Télécharge la dernière version dans l'onglet [Releases](../../releases), puis lance `Capglow.exe`. Aucun pilote n'est nécessaire.
+Télécharge la dernière version dans l'onglet [Releases](../../releases), puis lance l'exécutable. Aucun pilote ni installation n'est nécessaire.
+
+L'exécutable n'est pas signé numériquement. Windows peut donc afficher un avertissement SmartScreen (« Informations complémentaires », puis « Exécuter quand même »). Si Smart App Control est actif sur ton PC, il bloque les applications non signées : dans ce cas, lance Capglow depuis les sources (voir ci-dessous).
 
 ## Développement
 
 ```sh
-npm install
+npm install      # copie aussi Three.js dans src/vendor
 npm start        # lance l'application
 npm run dist     # génère l'exécutable portable dans dist/
 ```
@@ -48,7 +50,10 @@ Le code est en JavaScript sans framework :
 | `src/keyboard.js` | Disposition des touches et vignettes des effets |
 | `src/keyboard3d.js` | Rendu 3D (Three.js) |
 | `src/themes.js` | Coloris de l'EVO80 |
+| `src/led.js` | Calibrage des couleurs des LED pour l'aperçu |
 | `src/app.js` | Interface |
+| `preload.js` | Réglages exposés à l'interface (lancement au démarrage) |
+| `scripts/vendor-three.js` | Copie de Three.js dans l'application |
 
 ### Protocole
 
